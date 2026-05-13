@@ -1,0 +1,19 @@
+# Dakota ephemeral outputs
+dakota.dat
+dakota.out
+dakota.rst
+fort.13
+LHS_*.out
+out/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.eggs/
+*.egg-info/
+
+# Editor
+.DS_Store
+*~
+*.swp
