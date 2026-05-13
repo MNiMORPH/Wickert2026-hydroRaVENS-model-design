@@ -50,14 +50,19 @@ def _load_params_yml(path):
                 for name in names:
                     if name in params:
                         params[name]['active'] = False
-        return (pcfg['driver']['metric'], modules, params)
+        n_res = pcfg['driver'].get('n_reservoirs', 3)
+        return (pcfg['driver']['metric'], modules, params, n_res)
     except FileNotFoundError:
-        return 'KGE_logKGE_logFDC', {}, {}
+        return 'KGE_logKGE_logFDC', {}, {}, 3
 
 # Deferred: populated after --params arg is parsed
-METRIC  = None
-MODULES = None
-_PARAMS = None
+METRIC       = None
+MODULES      = None
+_PARAMS      = None
+N_RESERVOIRS = 3
+
+_T_NAMES = ['log__t_efold_shallow', 'log__t_efold_soil', 'log__t_efold_karst']
+_F_NAMES = ['f_exfiltration_shallow', 'f_exfiltration_soil']
 
 
 def _is_active(name):
@@ -86,11 +91,8 @@ def read_best_params(dat_file):
 def run_model(row):
     return run_and_score(
         CFG_TEMPLATE,
-        t_efold               = [10 ** _get(row, 'log__t_efold_shallow'),
-                                  10 ** _get(row, 'log__t_efold_soil'),
-                                  10 ** _get(row, 'log__t_efold_karst')],
-        f_to_discharge        = [_get(row, 'f_exfiltration_shallow'),
-                                  _get(row, 'f_exfiltration_soil')],
+        t_efold               = [10 ** _get(row, n) for n in _T_NAMES[:N_RESERVOIRS]],
+        f_to_discharge        = [_get(row, n) for n in _F_NAMES[:N_RESERVOIRS - 1]],
         melt_factor           =  _get(row, 'PDD_melt_factor'),
         fdd_threshold         =  10 ** _get(row, 'log__fdd_threshold'),
         snow_insulation_k     =  _get(row, 'snow_insulation_k'),
@@ -152,17 +154,18 @@ def make_plot(result, params, save_path, metric=METRIC):
     # Annotation box
     t_shallow  = 10 ** _get(params, 'log__t_efold_shallow')
     t_soil     = 10 ** _get(params, 'log__t_efold_soil')
-    t_karst    = 10 ** _get(params, 'log__t_efold_karst')
     routing_K  = 10 ** _get(params, 'log__routing_K')
 
     score_str = f'logKGE = {log_kge:.3f}   NSE = {nse:.3f}   KGE = {kge:.3f}   KGE$_{{logFDC}}$ = {kge_logfdc:.3f}   AIC = {aic:.1f}'
+    tau_str = f'$\\tau_{{sh}}$ = {t_shallow:.1f} d,  $\\tau_{{soil}}$ = {t_soil:.0f} d'
+    if N_RESERVOIRS >= 3:
+        tau_str += f',  $\\tau_{{karst}}$ = {10 ** _get(params, "log__t_efold_karst"):.0f} d'
+    f_str = f'$f_{{sh}}$ = {_get(params, "f_exfiltration_shallow"):.3f}'
+    if N_RESERVOIRS >= 3:
+        f_str += f',  $f_{{soil}}$ = {_get(params, "f_exfiltration_soil"):.3f}'
     param_lines = (
         f'BFI: obs = {result.bfi_obs:.3f},  mod = {result.bfi_mod:.3f}\n'
-        f'$\\tau_{{sh}}$ = {t_shallow:.1f} d,  '
-        f'$\\tau_{{soil}}$ = {t_soil:.0f} d,  '
-        f'$\\tau_{{karst}}$ = {t_karst:.0f} d\n'
-        f'$f_{{sh}}$ = {_get(params, "f_exfiltration_shallow"):.3f},  '
-        f'$f_{{soil}}$ = {_get(params, "f_exfiltration_soil"):.3f}'
+        + tau_str + '\n' + f_str
     )
     if _is_active('PDD_melt_factor'):
         param_lines += f',  PDD = {_get(params, "PDD_melt_factor"):.2f} mm °C$^{{-1}}$ d$^{{-1}}$'
@@ -206,7 +209,7 @@ if __name__ == '__main__':
     parser.add_argument('--no-show', action='store_true',   help='Save only; skip plt.show()')
     args = parser.parse_args()
 
-    METRIC, MODULES, _PARAMS = _load_params_yml(args.params)
+    METRIC, MODULES, _PARAMS, N_RESERVOIRS = _load_params_yml(args.params)
 
     best = read_best_params(args.dat)
 
@@ -214,9 +217,11 @@ if __name__ == '__main__':
     print(f'  metric           = {METRIC}')
     print(f'  t_efold_shallow  = {10 ** _get(best, "log__t_efold_shallow"):.1f} days')
     print(f'  t_efold_soil     = {10 ** _get(best, "log__t_efold_soil"):.0f} days')
-    print(f'  t_efold_karst    = {10 ** _get(best, "log__t_efold_karst"):.0f} days')
+    if N_RESERVOIRS >= 3:
+        print(f'  t_efold_karst    = {10 ** _get(best, "log__t_efold_karst"):.0f} days')
     print(f'  f_exfilt_shallow = {_get(best, "f_exfiltration_shallow"):.4f}')
-    print(f'  f_exfilt_soil    = {_get(best, "f_exfiltration_soil"):.4f}')
+    if N_RESERVOIRS >= 3:
+        print(f'  f_exfilt_soil    = {_get(best, "f_exfiltration_soil"):.4f}')
     if _is_active('PDD_melt_factor'):
         print(f'  PDD_melt_factor  = {_get(best, "PDD_melt_factor"):.4f} mm/°C/day')
     print(f'  Hmax_shallow     = {10 ** _get(best, "log__Hmax_shallow"):.1f} mm')

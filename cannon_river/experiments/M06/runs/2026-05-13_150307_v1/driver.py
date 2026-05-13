@@ -23,7 +23,6 @@ SPIN_UP_CYCLES = _driver['spin_up_cycles']
 ROUTING_N      = _driver['routing_N']
 DECADE_START   = _driver['decade_start']
 DECADE_END     = _driver['decade_end']
-N_RESERVOIRS   = _driver.get('n_reservoirs', 3)
 MODULES        = _cfg.get('modules', {})
 INITIAL_STATES = None   # set to a CalibResult.final_states dict for chained decades
 
@@ -51,14 +50,14 @@ def get(name):
     return params[name] if p['active'] else p['fixed']
 
 
-_T_NAMES = ['log__t_efold_shallow', 'log__t_efold_soil', 'log__t_efold_karst']
-_F_NAMES = ['f_exfiltration_shallow', 'f_exfiltration_soil']
-
 try:
     result = run_and_score(
         CONFIG_TEMPLATE,
-        t_efold               = [10 ** get(n) for n in _T_NAMES[:N_RESERVOIRS]],
-        f_to_discharge        = [get(n) for n in _F_NAMES[:N_RESERVOIRS - 1]],
+        t_efold               = [10 ** get('log__t_efold_shallow'),
+                                  10 ** get('log__t_efold_soil'),
+                                  10 ** get('log__t_efold_karst')],
+        f_to_discharge        = [get('f_exfiltration_shallow'),
+                                  get('f_exfiltration_soil')],
         melt_factor           =  get('PDD_melt_factor'),
         fdd_threshold         =  10 ** get('log__fdd_threshold'),
         snow_insulation_k     =  get('snow_insulation_k'),
