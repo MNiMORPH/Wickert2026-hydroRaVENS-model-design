@@ -1,0 +1,124 @@
+# N03: N01 + frozen-ground index (free FDD threshold, no insulation)
+# k = 6: τ_sh, τ_soil, f_sh, PDD, Q_base, FDD_thresh
+# FGI confirmed in M04; re-test in 2-res framework with new metric.
+
+modules:
+  snowpack:      true
+  frozen_ground: true
+  rain_on_snow:  true
+  direct_runoff: false
+  dtr_fgi_decay: false
+
+dakota:
+  ego_initial_samples:       300
+  ego_seed:                  12345
+  ps_max_evaluations:        200
+  ps_convergence_tolerance:  1.0e-4
+  evaluation_concurrency:    4
+
+driver:
+  config_template: 'cannon_cfg_1991_2011_et_tc_2res.yml'
+  metric:         'KGE_logKGE'
+  spin_up_cycles: null
+  routing_N:      2
+  n_reservoirs:   2
+  decade_start:   null
+  decade_end:     null
+
+parameters:
+
+  log__t_efold_shallow:
+    description: "log10 shallow/overland-flow e-folding time [days]"
+    lower:   0.3
+    upper:   2.0
+    initial: 1.2
+    fixed:   1.2
+    active:  true
+
+  log__t_efold_soil:
+    description: "log10 soil-zone e-folding time [days]"
+    lower:   1.0
+    upper:   2.7
+    initial: 1.8
+    fixed:   1.8
+    active:  true
+
+  log__t_efold_karst:
+    description: "log10 karst e-folding time [days] — not used in 2-reservoir model"
+    lower:   2.5
+    upper:   4.5
+    initial: 3.5
+    fixed:   3.5
+    active:  false
+
+  f_exfiltration_shallow:
+    description: "fraction of shallow exfiltration to stream (remainder recharges soil)"
+    lower:   0.01
+    upper:   0.99
+    initial: 0.80
+    fixed:   0.80
+    active:  true
+
+  f_exfiltration_soil:
+    description: "soil exfiltration fraction — fixed at 1.0 in 2-reservoir model"
+    lower:   0.01
+    upper:   0.99
+    initial: 1.0
+    fixed:   1.0
+    active:  false
+
+  PDD_melt_factor:
+    description: "degree-day snowmelt rate [mm SWE / degC / day]"
+    lower:   0.1
+    upper:   10.0
+    initial: 1.0
+    fixed:   1.0
+    active:  true
+
+  log__Hmax_shallow:
+    description: "log10 shallow-reservoir max effective depth [mm]"
+    lower:   1.0
+    upper:   3.5
+    initial: 2.3
+    fixed:   3.5
+    active:  false
+
+  log__fdd_threshold:
+    description: "log10 frozen-ground-index threshold [degC·day]"
+    lower:   0.0
+    upper:   3.0
+    initial: 1.9
+    fixed:   3.0
+    active:  true
+
+  snow_insulation_k:
+    description: "snow insulation decay constant [mm⁻¹ SWE]"
+    lower:   0.0
+    upper:   0.15
+    initial: 0.057
+    fixed:   0.0
+    active:  false
+
+  f_direct_runoff:
+    description: "fast-bypass fraction of daily recharge"
+    lower:   0.0
+    upper:   0.5
+    initial: 0.05
+    fixed:   0.0
+    active:  false
+
+  baseflow_Q:
+    description: "constant regional groundwater import [mm/day]"
+    lower:   0.0
+    upper:   0.3
+    initial: 0.05
+    fixed:   0.0
+    active:  true
+
+  log__routing_K:
+    description: "log10 Nash-cascade storage time constant [days]"
+    lower:   -1.0
+    upper:    1.0
+    initial:  0.0
+    fixed:    0.0
+    active:  false
