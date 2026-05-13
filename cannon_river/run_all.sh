@@ -2,15 +2,32 @@
 # Usage: bash run_all.sh <short-description>
 # e.g.:  bash run_all.sh v1
 #
-# Runs all model-selection experiments (M00–M06) in series, each archived
-# under runs/<timestamp>_<desc>/ inside its own experiment directory.
+# Runs model-selection experiments in series, each archived under
+# runs/<timestamp>_<desc>/ inside its own experiment directory.
+# Default: all M- and N-series. Override with --series M or --series N.
 
 set -euo pipefail
 
-DESC="${1:?Usage: bash run_all.sh <short-description>  e.g. v1}"
+DESC=""
+SERIES="all"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --series) SERIES="$2"; shift 2 ;;
+        *)        DESC="$1";   shift   ;;
+    esac
+done
+DESC="${DESC:?Usage: bash run_all.sh <description> [--series M|N|all]}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-EXPERIMENTS=( M00 M01 M02 M03 M04 M05 M06 )
+
+M_SERIES=( M00 M01 M02 M03 M04 M05 M06 )
+N_SERIES=( N00 N01 N02 N03 N04 )
+case "$SERIES" in
+    M)   EXPERIMENTS=( "${M_SERIES[@]}" ) ;;
+    N)   EXPERIMENTS=( "${N_SERIES[@]}" ) ;;
+    all) EXPERIMENTS=( "${M_SERIES[@]}" "${N_SERIES[@]}" ) ;;
+    *)   echo "Unknown series '$SERIES'. Use M, N, or all." >&2; exit 1 ;;
+esac
 
 for EXP in "${EXPERIMENTS[@]}"; do
     echo ""
@@ -26,5 +43,5 @@ echo "======================================================"
 echo "  All experiments complete  ($(date '+%Y-%m-%d %H:%M:%S'))"
 echo "======================================================"
 echo "  Run 'python compare_aic.py' from cannon_river/ to"
-echo "  collect AIC and goodness-of-fit across M00–M06."
+echo "  collect AIC and goodness-of-fit across experiments."
 echo "======================================================"
