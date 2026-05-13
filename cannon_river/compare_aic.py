@@ -48,7 +48,8 @@ def _load_params_yml(path):
                     params[name]['active'] = False
     cfg_template = pcfg['driver']['config_template']
     metric       = pcfg['driver']['metric']
-    return metric, modules, params, cfg_template
+    n_reservoirs = pcfg['driver'].get('n_reservoirs', 3)
+    return metric, modules, params, cfg_template, n_reservoirs
 
 
 def _is_active(params, name):
@@ -78,17 +79,18 @@ def _latest_run_dir(exp_dir):
     return runs[-1]
 
 
-def _run_model(row, params, modules, metric, cfg_template, exp_dir):
+def _run_model(row, params, modules, metric, cfg_template, exp_dir, n_reservoirs=3):
     g = lambda name: _get(row, params, name)
-    # cfg_template path is relative to the experiment directory
+    t_efold_all      = [10 ** g('log__t_efold_shallow'),
+                        10 ** g('log__t_efold_soil'),
+                        10 ** g('log__t_efold_karst')]
+    f_discharge_all  = [g('f_exfiltration_shallow'),
+                        g('f_exfiltration_soil')]
     cfg_path = str(Path(exp_dir, cfg_template))
     return run_and_score(
         cfg_path,
-        t_efold               = [10 ** g('log__t_efold_shallow'),
-                                  10 ** g('log__t_efold_soil'),
-                                  10 ** g('log__t_efold_karst')],
-        f_to_discharge        = [g('f_exfiltration_shallow'),
-                                  g('f_exfiltration_soil')],
+        t_efold               = t_efold_all[:n_reservoirs],
+        f_to_discharge        = f_discharge_all[:n_reservoirs - 1],
         melt_factor           =  g('PDD_melt_factor'),
         fdd_threshold         =  10 ** g('log__fdd_threshold'),
         snow_insulation_k     =  g('snow_insulation_k'),
@@ -112,7 +114,7 @@ def process_experiment(exp_dir):
     if not params_path.exists():
         return None
 
-    metric, modules, params, cfg_template = _load_params_yml(params_path)
+    metric, modules, params, cfg_template, n_reservoirs = _load_params_yml(params_path)
     k = _n_active(params)
 
     run_dir = _latest_run_dir(exp_dir)
@@ -129,7 +131,7 @@ def process_experiment(exp_dir):
     print(f'  {exp_name}: reading {run_dir.name} ...', file=sys.stderr)
     best = _best_row(eval_file)
 
-    result = _run_model(best, params, modules, metric, cfg_template, exp_dir)
+    result = _run_model(best, params, modules, metric, cfg_template, exp_dir, n_reservoirs)
     b    = result.buckets
     mask = (b.hydrodata['Specific Discharge (modeled) [mm/day]'].notna()
             & b.hydrodata['Specific Discharge [mm/day]'].notna())
