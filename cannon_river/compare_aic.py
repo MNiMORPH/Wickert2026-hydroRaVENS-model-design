@@ -3,16 +3,16 @@
 compare_aic.py — Collect best-fit metrics from all model-selection experiments
 and print a summary table suitable for the paper.
 
-For each experiment M00–M06 (or whatever is present in experiments/):
+For each experiment with the given prefix (e.g. M00–M06 or N00–N04):
   1. Locate the most-recently archived run.
   2. Read the best-fit row from evaluations.dat (lowest neg_kge).
   3. Re-run hydroRaVENS with those parameters (same logic as plot_best.py).
   4. Extract logKGE, NSE, KGE, KGE_logFDC, AIC, BFI_obs, BFI_mod.
 
 Usage (from cannon_river/):
-    python compare_aic.py
-    python compare_aic.py --experiments M01 M03 M05   # subset
-    python compare_aic.py --csv results_table.csv
+    python compare_aic.py M
+    python compare_aic.py N --experiments N01 N03   # subset
+    python compare_aic.py M --csv results_table.csv
 """
 
 import argparse
@@ -152,8 +152,10 @@ def process_experiment(exp_dir):
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument('prefix',
+                        help='Experiment prefix letter (e.g. M or N)')
     parser.add_argument('--experiments', nargs='+',
-                        default=None, help='Subset of experiment names (default: all)')
+                        default=None, help='Subset of experiment names (default: all with prefix)')
     parser.add_argument('--csv', default=None, help='Save table to CSV')
     args = parser.parse_args()
 
@@ -165,7 +167,7 @@ def main():
         exp_dirs = [experiments_root / e for e in args.experiments]
     else:
         exp_dirs = sorted(experiments_root.iterdir())
-        exp_dirs = [d for d in exp_dirs if d.is_dir()]
+        exp_dirs = [d for d in exp_dirs if d.is_dir() and d.name.startswith(args.prefix)]
 
     print('Collecting results...\n', file=sys.stderr)
     rows = []
