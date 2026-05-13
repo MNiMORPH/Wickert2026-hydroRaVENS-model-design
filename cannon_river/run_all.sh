@@ -4,7 +4,7 @@
 #
 # Runs model-selection experiments in series, each archived under
 # runs/<timestamp>_<desc>/ inside its own experiment directory.
-# Default: all M- and N-series. Override with --series M or --series N.
+# Default: all M-, N-, and O-series. Override with --series M, N, or O.
 
 set -euo pipefail
 
@@ -16,17 +16,19 @@ while [[ $# -gt 0 ]]; do
         *)        DESC="$1";   shift   ;;
     esac
 done
-DESC="${DESC:?Usage: bash run_all.sh <description> [--series M|N|all]}"
+DESC="${DESC:?Usage: bash run_all.sh <description> [--series M|N|O|all]}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 M_SERIES=( M00 M01 M02 M03 M04 M05 M06 )
 N_SERIES=( N00 N01 N02 N03 N04 )
+O_SERIES=( O00 O01 O02 O03 )
 case "$SERIES" in
     M)   EXPERIMENTS=( "${M_SERIES[@]}" ) ;;
     N)   EXPERIMENTS=( "${N_SERIES[@]}" ) ;;
-    all) EXPERIMENTS=( "${M_SERIES[@]}" "${N_SERIES[@]}" ) ;;
-    *)   echo "Unknown series '$SERIES'. Use M, N, or all." >&2; exit 1 ;;
+    O)   EXPERIMENTS=( "${O_SERIES[@]}" ) ;;
+    all) EXPERIMENTS=( "${M_SERIES[@]}" "${N_SERIES[@]}" "${O_SERIES[@]}" ) ;;
+    *)   echo "Unknown series '$SERIES'. Use M, N, O, or all." >&2; exit 1 ;;
 esac
 
 for EXP in "${EXPERIMENTS[@]}"; do
