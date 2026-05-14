@@ -1,0 +1,164 @@
+# R04: Q03 + direct runoff (fast-bypass fraction added to best structure)
+# k = 11: τ_sh, τ_soil, τ_karst, f_sh, f_soil, PDD, H0_pdm_sh, H0_pdm_soil,
+#         f_tile_soil, τ_tile, f_direct_runoff
+
+modules:
+  snowpack:      true
+  frozen_ground: false
+  rain_on_snow:  true
+  direct_runoff: true
+  dtr_fgi_decay: false
+
+dakota:
+  ego_initial_samples:       300
+  ego_seed:                  12345
+  ps_max_evaluations:        200
+  ps_convergence_tolerance:  1.0e-4
+  evaluation_concurrency:    4
+
+driver:
+  config_template: 'cannon_cfg_1991_2011_et_tc.yml'
+  metric:         'KGE_logKGE'
+  spin_up_cycles: null
+  routing_N:      2
+  n_reservoirs:   3
+  decade_start:   null
+  decade_end:     null
+
+parameters:
+
+  log__t_efold_shallow:
+    description: "log10 shallow/overland-flow e-folding time [days]"
+    lower:   0.3
+    upper:   2.0
+    initial: 1.2
+    fixed:   1.2
+    active:  true
+
+  log__t_efold_soil:
+    description: "log10 soil-zone e-folding time [days]"
+    lower:   1.0
+    upper:   2.7
+    initial: 1.8
+    fixed:   1.8
+    active:  true
+
+  log__t_efold_karst:
+    description: "log10 karst/bedrock e-folding time [days]"
+    lower:   2.5
+    upper:   4.5
+    initial: 3.5
+    fixed:   3.5
+    active:  true
+
+  f_exfiltration_shallow:
+    description: "fraction of shallow exfiltration to stream (remainder recharges soil)"
+    lower:   0.01
+    upper:   0.99
+    initial: 0.80
+    fixed:   0.80
+    active:  true
+
+  f_exfiltration_soil:
+    description: "fraction of soil-zone exfiltration to stream (remainder recharges karst)"
+    lower:   0.01
+    upper:   0.99
+    initial: 0.10
+    fixed:   0.10
+    active:  true
+
+  PDD_melt_factor:
+    description: "degree-day snowmelt rate [mm SWE / degC / day]"
+    lower:   0.1
+    upper:   10.0
+    initial: 1.0
+    fixed:   1.0
+    active:  true
+
+  log__Hmax_shallow:
+    description: "log10 shallow-reservoir max effective depth [mm] — disabled; PDM used"
+    lower:   1.0
+    upper:   3.5
+    initial: 2.3
+    fixed:   3.5
+    active:  false
+
+  log__H0_pdm_shallow:
+    description: "log10 PDM characteristic storage depth [mm] — shallow reservoir"
+    lower:   1.0
+    upper:   3.5
+    initial: 2.3
+    fixed:   2.3
+    active:  true
+
+  log__H0_pdm_soil:
+    description: "log10 PDM characteristic storage depth [mm] — soil reservoir"
+    lower:   1.0
+    upper:   3.5
+    initial: 2.3
+    fixed:   2.3
+    active:  true
+
+  log__H0_pdm_karst:
+    description: "log10 PDM characteristic storage depth [mm] — karst (disabled)"
+    lower:   1.0
+    upper:   3.5
+    initial: 2.3
+    fixed:   2.3
+    active:  false
+
+  log__fdd_threshold:
+    description: "log10 frozen-ground-index threshold [degC·day]"
+    lower:   0.0
+    upper:   3.0
+    initial: 1.9
+    fixed:   3.0
+    active:  false
+
+  snow_insulation_k:
+    description: "snow insulation decay constant [mm⁻¹ SWE]"
+    lower:   0.0
+    upper:   0.15
+    initial: 0.057
+    fixed:   0.0
+    active:  false
+
+  f_tile_soil:
+    description: "fraction of soil-zone drainage routed to tile sub-reservoir"
+    lower:   0.0
+    upper:   0.99
+    initial: 0.3
+    fixed:   0.0
+    active:  true
+
+  log__tau_tile:
+    description: "log10 tile-drain e-folding time [days]"
+    lower:   0.0
+    upper:   1.146
+    initial: 0.845
+    fixed:   0.845
+    active:  true
+
+  f_direct_runoff:
+    description: "fast-bypass fraction of daily recharge"
+    lower:   0.0
+    upper:   0.5
+    initial: 0.05
+    fixed:   0.0
+    active:  true
+
+  baseflow_Q:
+    description: "constant regional groundwater import [mm/day]"
+    lower:   0.0
+    upper:   0.3
+    initial: 0.05
+    fixed:   0.0
+    active:  false
+
+  log__routing_K:
+    description: "log10 Nash-cascade storage time constant [days]"
+    lower:   -1.0
+    upper:    1.0
+    initial:  0.0
+    fixed:    0.0
+    active:  false
