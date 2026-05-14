@@ -61,8 +61,9 @@ MODULES      = None
 _PARAMS      = None
 N_RESERVOIRS = 3
 
-_T_NAMES = ['log__t_efold_shallow', 'log__t_efold_soil', 'log__t_efold_karst']
-_F_NAMES = ['f_exfiltration_shallow', 'f_exfiltration_soil']
+_T_NAMES   = ['log__t_efold_shallow', 'log__t_efold_soil', 'log__t_efold_karst']
+_F_NAMES   = ['f_exfiltration_shallow', 'f_exfiltration_soil']
+_PDM_NAMES = ['log__H0_pdm_shallow', 'log__H0_pdm_soil', 'log__H0_pdm_karst']
 
 
 def _is_active(name):
@@ -88,6 +89,12 @@ def read_best_params(dat_file):
     return df.loc[df[OBJECTIVE_COL].idxmin()]
 
 
+def _pdm_list(row):
+    vals = [10 ** _get(row, n) if _is_active(n) else None
+            for n in _PDM_NAMES[:N_RESERVOIRS]]
+    return vals if any(v is not None for v in vals) else None
+
+
 def run_model(row):
     return run_and_score(
         CFG_TEMPLATE,
@@ -97,6 +104,7 @@ def run_model(row):
         fdd_threshold         =  10 ** _get(row, 'log__fdd_threshold'),
         snow_insulation_k     =  _get(row, 'snow_insulation_k'),
         Hmax                  = [10 ** _get(row, 'log__Hmax_shallow')],
+        pdm_H0                =  _pdm_list(row),
         direct_runoff_fraction=  _get(row, 'f_direct_runoff'),
         baseflow_Q            =  _get(row, 'baseflow_Q'),
         routing_K             =  10 ** _get(row, 'log__routing_K'),
@@ -169,7 +177,14 @@ def make_plot(result, params, save_path, metric=METRIC):
     )
     if _is_active('PDD_melt_factor'):
         param_lines += f',  PDD = {_get(params, "PDD_melt_factor"):.2f} mm °C$^{{-1}}$ d$^{{-1}}$'
-    param_lines += f'\n$H_{{max}}$ = {10 ** _get(params, "log__Hmax_shallow"):.0f} mm'
+    if _is_active('log__Hmax_shallow'):
+        param_lines += f',  $H_{{max}}$ = {10 ** _get(params, "log__Hmax_shallow"):.0f} mm'
+    for _pdm_n, _label in zip(_PDM_NAMES[:N_RESERVOIRS],
+                               [r'$H_{0,\mathrm{sh}}$',
+                                r'$H_{0,\mathrm{soil}}$',
+                                r'$H_{0,\mathrm{karst}}$']):
+        if _is_active(_pdm_n):
+            param_lines += f',  {_label} = {10 ** _get(params, _pdm_n):.0f} mm'
     if _is_active('log__fdd_threshold'):
         param_lines += f',  FDD$_{{thresh}}$ = {10 ** _get(params, "log__fdd_threshold"):.0f} °C·d'
     if _is_active('snow_insulation_k'):
@@ -224,7 +239,12 @@ if __name__ == '__main__':
         print(f'  f_exfilt_soil    = {_get(best, "f_exfiltration_soil"):.4f}')
     if _is_active('PDD_melt_factor'):
         print(f'  PDD_melt_factor  = {_get(best, "PDD_melt_factor"):.4f} mm/°C/day')
-    print(f'  Hmax_shallow     = {10 ** _get(best, "log__Hmax_shallow"):.1f} mm')
+    if _is_active('log__Hmax_shallow'):
+        print(f'  Hmax_shallow     = {10 ** _get(best, "log__Hmax_shallow"):.1f} mm')
+    for _pdm_n, _lbl in zip(_PDM_NAMES[:N_RESERVOIRS],
+                             ['H0_pdm_shallow', 'H0_pdm_soil', 'H0_pdm_karst']):
+        if _is_active(_pdm_n):
+            print(f'  {_lbl:<17}= {10 ** _get(best, _pdm_n):.1f} mm')
     if _is_active('log__fdd_threshold'):
         print(f'  fdd_threshold    = {10 ** _get(best, "log__fdd_threshold"):.1f} °C·day')
     if _is_active('snow_insulation_k'):

@@ -51,8 +51,15 @@ def get(name):
     return params[name] if p['active'] else p['fixed']
 
 
-_T_NAMES = ['log__t_efold_shallow', 'log__t_efold_soil', 'log__t_efold_karst']
-_F_NAMES = ['f_exfiltration_shallow', 'f_exfiltration_soil']
+_T_NAMES   = ['log__t_efold_shallow', 'log__t_efold_soil', 'log__t_efold_karst']
+_F_NAMES   = ['f_exfiltration_shallow', 'f_exfiltration_soil']
+_PDM_NAMES = ['log__H0_pdm_shallow', 'log__H0_pdm_soil', 'log__H0_pdm_karst']
+
+def _pdm_list():
+    """Return pdm_H0 list if any reservoir has an active PDM parameter, else None."""
+    vals = [10 ** get(n) if n in _param_cfg and _param_cfg[n]['active'] else None
+            for n in _PDM_NAMES[:N_RESERVOIRS]]
+    return vals if any(v is not None for v in vals) else None
 
 try:
     result = run_and_score(
@@ -63,6 +70,7 @@ try:
         fdd_threshold         =  10 ** get('log__fdd_threshold'),
         snow_insulation_k     =  get('snow_insulation_k'),
         Hmax                  = [10 ** get('log__Hmax_shallow')],
+        pdm_H0                =  _pdm_list(),
         direct_runoff_fraction=  get('f_direct_runoff'),
         baseflow_Q            =  get('baseflow_Q'),
         modules               =  MODULES,
