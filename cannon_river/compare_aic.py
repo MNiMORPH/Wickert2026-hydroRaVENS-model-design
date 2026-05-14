@@ -49,10 +49,11 @@ def _load_params_yml(path):
             for name in names:
                 if name in params:
                     params[name]['active'] = False
-    cfg_template = pcfg['driver']['config_template']
-    metric       = pcfg['driver']['metric']
-    n_reservoirs = pcfg['driver'].get('n_reservoirs', 3)
-    return metric, modules, params, cfg_template, n_reservoirs
+    cfg_template     = pcfg['driver']['config_template']
+    metric           = pcfg['driver']['metric']
+    n_reservoirs     = pcfg['driver'].get('n_reservoirs', 3)
+    enforce_wb       = pcfg['driver'].get('enforce_water_balance', 'water-year')
+    return metric, modules, params, cfg_template, n_reservoirs, enforce_wb
 
 
 def _is_active(params, name):
@@ -101,7 +102,14 @@ def _tau_tile(row, params):
     return 10 ** _get(row, params, 'log__tau_tile')
 
 
-def _run_model(row, params, modules, metric, cfg_template, exp_dir, n_reservoirs=3):
+def _et_scale(row, params):
+    if 'et_scale' not in params:
+        return None
+    return _get(row, params, 'et_scale')
+
+
+def _run_model(row, params, modules, metric, cfg_template, exp_dir,
+               n_reservoirs=3, enforce_wb='water-year'):
     g = lambda name: _get(row, params, name)
     t_efold_all      = [10 ** g('log__t_efold_shallow'),
                         10 ** g('log__t_efold_soil'),
@@ -122,10 +130,12 @@ def _run_model(row, params, modules, metric, cfg_template, exp_dir, n_reservoirs
         tau_tile              =  _tau_tile(row, params),
         direct_runoff_fraction=  g('f_direct_runoff'),
         baseflow_Q            =  g('baseflow_Q'),
+        et_scale              =  _et_scale(row, params),
         routing_K             =  10 ** g('log__routing_K'),
         routing_N             =  ROUTING_N,
         modules               =  modules,
         metric                =  metric,
+        enforce_water_balance =  enforce_wb,
     )
 
 
@@ -139,7 +149,7 @@ def process_experiment(exp_dir):
     if not params_path.exists():
         return None
 
-    metric, modules, params, cfg_template, n_reservoirs = _load_params_yml(params_path)
+    metric, modules, params, cfg_template, n_reservoirs, enforce_wb = _load_params_yml(params_path)
     k = _n_active(params)
 
     run_dir = _latest_run_dir(exp_dir)
@@ -156,7 +166,8 @@ def process_experiment(exp_dir):
     print(f'  {exp_name}: reading {run_dir.name} ...', file=sys.stderr)
     best = _best_row(eval_file)
 
-    result = _run_model(best, params, modules, metric, cfg_template, exp_dir, n_reservoirs)
+    result = _run_model(best, params, modules, metric, cfg_template, exp_dir,
+                        n_reservoirs, enforce_wb)
     b    = result.buckets
     mask = (b.hydrodata['Specific Discharge (modeled) [mm/day]'].notna()
             & b.hydrodata['Specific Discharge [mm/day]'].notna())
