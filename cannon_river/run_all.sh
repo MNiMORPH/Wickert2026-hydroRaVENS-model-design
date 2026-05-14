@@ -4,7 +4,7 @@
 #
 # Runs model-selection experiments in series, each archived under
 # runs/<timestamp>_<desc>/ inside its own experiment directory.
-# Default: all M-, N-, O-, and P-series. Override with --series M, N, O, or P.
+# Default: all M-, N-, O-, P-, Q-, and R-series. Override with --series M, N, O, P, Q, or R.
 
 set -euo pipefail
 
@@ -24,13 +24,17 @@ M_SERIES=( M00 M01 M02 M03 M04 M05 M06 )
 N_SERIES=( N00 N01 N02 N03 N04 )
 O_SERIES=( O00 O01 O02 O03 )
 P_SERIES=( P00 P01 P02 P03 )
+Q_SERIES=( Q00 Q01 Q02 Q03 )
+R_SERIES=( R00 R01 R02 R03 R04 R05 )
 case "$SERIES" in
     M)   EXPERIMENTS=( "${M_SERIES[@]}" ) ;;
     N)   EXPERIMENTS=( "${N_SERIES[@]}" ) ;;
     O)   EXPERIMENTS=( "${O_SERIES[@]}" ) ;;
     P)   EXPERIMENTS=( "${P_SERIES[@]}" ) ;;
-    all) EXPERIMENTS=( "${M_SERIES[@]}" "${N_SERIES[@]}" "${O_SERIES[@]}" "${P_SERIES[@]}" ) ;;
-    *)   echo "Unknown series '$SERIES'. Use M, N, O, P, or all." >&2; exit 1 ;;
+    Q)   EXPERIMENTS=( "${Q_SERIES[@]}" ) ;;
+    R)   EXPERIMENTS=( "${R_SERIES[@]}" ) ;;
+    all) EXPERIMENTS=( "${M_SERIES[@]}" "${N_SERIES[@]}" "${O_SERIES[@]}" "${P_SERIES[@]}" "${Q_SERIES[@]}" "${R_SERIES[@]}" ) ;;
+    *)   echo "Unknown series '$SERIES'. Use M, N, O, P, Q, R, or all." >&2; exit 1 ;;
 esac
 
 for EXP in "${EXPERIMENTS[@]}"; do

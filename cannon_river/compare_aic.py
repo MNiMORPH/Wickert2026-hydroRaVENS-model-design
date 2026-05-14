@@ -35,6 +35,9 @@ _MODULE_PARAMS_MAP = {
     'rain_on_snow':  [],
 }
 
+_PDM_NAMES  = ['log__H0_pdm_shallow', 'log__H0_pdm_soil', 'log__H0_pdm_karst']
+_TILE_NAMES = ['f_tile_shallow', 'f_tile_soil', 'f_tile_karst']
+
 
 def _load_params_yml(path):
     with open(path) as f:
@@ -79,6 +82,25 @@ def _latest_run_dir(exp_dir):
     return runs[-1]
 
 
+def _pdm_list(row, params, n_reservoirs):
+    vals = [10 ** _get(row, params, n) if _is_active(params, n) else None
+            for n in _PDM_NAMES[:n_reservoirs]]
+    return vals if any(v is not None for v in vals) else None
+
+
+def _tile_list(row, params, n_reservoirs):
+    if not any(n in params for n in _TILE_NAMES[:n_reservoirs]):
+        return None
+    return [_get(row, params, n) if n in params else 0.0
+            for n in _TILE_NAMES[:n_reservoirs]]
+
+
+def _tau_tile(row, params):
+    if 'log__tau_tile' not in params:
+        return None
+    return 10 ** _get(row, params, 'log__tau_tile')
+
+
 def _run_model(row, params, modules, metric, cfg_template, exp_dir, n_reservoirs=3):
     g = lambda name: _get(row, params, name)
     t_efold_all      = [10 ** g('log__t_efold_shallow'),
@@ -95,6 +117,9 @@ def _run_model(row, params, modules, metric, cfg_template, exp_dir, n_reservoirs
         fdd_threshold         =  10 ** g('log__fdd_threshold'),
         snow_insulation_k     =  g('snow_insulation_k'),
         Hmax                  = [10 ** g('log__Hmax_shallow')],
+        pdm_H0                =  _pdm_list(row, params, n_reservoirs),
+        f_tile                =  _tile_list(row, params, n_reservoirs),
+        tau_tile              =  _tau_tile(row, params),
         direct_runoff_fraction=  g('f_direct_runoff'),
         baseflow_Q            =  g('baseflow_Q'),
         routing_K             =  10 ** g('log__routing_K'),

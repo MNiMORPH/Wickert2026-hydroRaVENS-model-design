@@ -51,15 +51,29 @@ def get(name):
     return params[name] if p['active'] else p['fixed']
 
 
-_T_NAMES   = ['log__t_efold_shallow', 'log__t_efold_soil', 'log__t_efold_karst']
-_F_NAMES   = ['f_exfiltration_shallow', 'f_exfiltration_soil']
-_PDM_NAMES = ['log__H0_pdm_shallow', 'log__H0_pdm_soil', 'log__H0_pdm_karst']
+_T_NAMES    = ['log__t_efold_shallow', 'log__t_efold_soil', 'log__t_efold_karst']
+_F_NAMES    = ['f_exfiltration_shallow', 'f_exfiltration_soil']
+_PDM_NAMES  = ['log__H0_pdm_shallow', 'log__H0_pdm_soil', 'log__H0_pdm_karst']
+_TILE_NAMES = ['f_tile_shallow', 'f_tile_soil', 'f_tile_karst']
 
 def _pdm_list():
     """Return pdm_H0 list if any reservoir has an active PDM parameter, else None."""
     vals = [10 ** get(n) if n in _param_cfg and _param_cfg[n]['active'] else None
             for n in _PDM_NAMES[:N_RESERVOIRS]]
     return vals if any(v is not None for v in vals) else None
+
+def _tile_list():
+    """Return f_tile list if any tile parameter exists in params.yml, else None."""
+    if not any(n in _param_cfg for n in _TILE_NAMES[:N_RESERVOIRS]):
+        return None
+    return [get(n) if n in _param_cfg else 0.0
+            for n in _TILE_NAMES[:N_RESERVOIRS]]
+
+def _tau_tile():
+    """Return tile residence time [days] if log__tau_tile exists, else None."""
+    if 'log__tau_tile' not in _param_cfg:
+        return None
+    return 10 ** get('log__tau_tile')
 
 try:
     result = run_and_score(
@@ -71,6 +85,8 @@ try:
         snow_insulation_k     =  get('snow_insulation_k'),
         Hmax                  = [10 ** get('log__Hmax_shallow')],
         pdm_H0                =  _pdm_list(),
+        f_tile                =  _tile_list(),
+        tau_tile              =  _tau_tile(),
         direct_runoff_fraction=  get('f_direct_runoff'),
         baseflow_Q            =  get('baseflow_Q'),
         modules               =  MODULES,
