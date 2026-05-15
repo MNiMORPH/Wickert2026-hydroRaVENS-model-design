@@ -92,8 +92,13 @@ def _pdm_list(row, params, n_reservoirs):
 def _tile_list(row, params, n_reservoirs):
     if not any(n in params for n in _TILE_NAMES[:n_reservoirs]):
         return None
-    return [_get(row, params, n) if n in params else 0.0
+    vals = [_get(row, params, n) if n in params else 0.0
             for n in _TILE_NAMES[:n_reservoirs]]
+    # Shared tile: shallow uses soil's value when f_tile_shallow is absent
+    # (same tile network, one calibrated parameter covers both reservoirs).
+    if 'f_tile_shallow' not in params and 'f_tile_soil' in params:
+        vals[0] = vals[1]
+    return vals
 
 
 def _tau_tile(row, params):
@@ -106,6 +111,12 @@ def _et_scale(row, params):
     if 'et_scale' not in params:
         return None
     return _get(row, params, 'et_scale')
+
+
+def _et_alpha(row, params):
+    if 'et_alpha' not in params:
+        return None
+    return _get(row, params, 'et_alpha')
 
 
 def _run_model(row, params, modules, metric, cfg_template, exp_dir,
@@ -131,6 +142,7 @@ def _run_model(row, params, modules, metric, cfg_template, exp_dir,
         direct_runoff_fraction=  g('f_direct_runoff'),
         baseflow_Q            =  g('baseflow_Q'),
         et_scale              =  _et_scale(row, params),
+        et_alpha              =  _et_alpha(row, params),
         routing_K             =  10 ** g('log__routing_K'),
         routing_N             =  ROUTING_N,
         modules               =  modules,
