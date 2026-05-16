@@ -119,6 +119,18 @@ def _et_alpha(row, params):
     return _get(row, params, 'et_alpha')
 
 
+def _wp_soil(row, params):
+    if 'wp_soil' not in params:
+        return None
+    return _get(row, params, 'wp_soil')
+
+
+def _wp_soil_sigma(row, params):
+    if 'wp_soil_sigma' not in params:
+        return None
+    return _get(row, params, 'wp_soil_sigma')
+
+
 def _run_model(row, params, modules, metric, cfg_template, exp_dir,
                n_reservoirs=3, enforce_wb='water-year'):
     g = lambda name: _get(row, params, name)
@@ -143,6 +155,8 @@ def _run_model(row, params, modules, metric, cfg_template, exp_dir,
         baseflow_Q            =  g('baseflow_Q'),
         et_scale              =  _et_scale(row, params),
         et_alpha              =  _et_alpha(row, params),
+        wp_soil               =  _wp_soil(row, params),
+        wp_soil_sigma         =  _wp_soil_sigma(row, params),
         routing_K             =  10 ** g('log__routing_K'),
         routing_N             =  ROUTING_N,
         modules               =  modules,
