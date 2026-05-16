@@ -131,6 +131,22 @@ def _wp_soil_sigma(row, params):
     return _get(row, params, 'wp_soil_sigma')
 
 
+def _recession_exponents(row, params, n_reservoirs):
+    """Build recession_exponents list; None if no recession params present."""
+    has_shared  = 'recession_b'       in params
+    has_soil    = 'recession_b_soil'  in params
+    has_karst   = 'recession_b_karst' in params
+    if not (has_shared or has_soil or has_karst):
+        return None, 0
+    b_soil  = (_get(row, params, 'recession_b')      if has_shared else
+               _get(row, params, 'recession_b_soil') if has_soil   else 1.0)
+    b_karst = (_get(row, params, 'recession_b')       if has_shared else
+               _get(row, params, 'recession_b_karst') if has_karst  else 1.0)
+    exponents = [1.0, b_soil, b_karst][:n_reservoirs]
+    n_calibrated = (1 if has_shared else 0) + (1 if has_soil else 0) + (1 if has_karst else 0)
+    return exponents, n_calibrated
+
+
 def _run_model(row, params, modules, metric, cfg_template, exp_dir,
                n_reservoirs=3, enforce_wb='water-year'):
     g = lambda name: _get(row, params, name)
@@ -139,6 +155,7 @@ def _run_model(row, params, modules, metric, cfg_template, exp_dir,
                         10 ** g('log__t_efold_karst')]
     f_discharge_all  = [g('f_exfiltration_shallow'),
                         g('f_exfiltration_soil')]
+    rec_exp, rec_k = _recession_exponents(row, params, n_reservoirs)
     cfg_path = str(Path(exp_dir, cfg_template))
     return run_and_score(
         cfg_path,
@@ -157,6 +174,8 @@ def _run_model(row, params, modules, metric, cfg_template, exp_dir,
         et_alpha              =  _et_alpha(row, params),
         wp_soil               =  _wp_soil(row, params),
         wp_soil_sigma         =  _wp_soil_sigma(row, params),
+        recession_exponents           = rec_exp,
+        recession_exponents_calibrated = rec_k,
         routing_K             =  10 ** g('log__routing_K'),
         routing_N             =  ROUTING_N,
         modules               =  modules,

@@ -21,7 +21,7 @@ while [[ $# -gt 0 ]]; do
         *)        DESC="$1";   shift   ;;
     esac
 done
-DESC="${DESC:?Usage: bash run_all.sh <description> [--series M|N|O|P|Q|R|S|T|U|V|all] [--from N]}"
+DESC="${DESC:?Usage: bash run_all.sh <description> [--series M|N|O|P|Q|R|S|T|U|V|W|all] [--from N]}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -35,6 +35,7 @@ S_SERIES=( S00 S01 )
 T_SERIES=( T00 T01 )
 U_SERIES=( U00 U01 )
 V_SERIES=( V00 V01 V02 V03 V04 V05 V06 )
+W_SERIES=( W00 W01 W02 )
 case "$SERIES" in
     M)   EXPERIMENTS=( "${M_SERIES[@]}" ) ;;
     N)   EXPERIMENTS=( "${N_SERIES[@]}" ) ;;
@@ -46,8 +47,9 @@ case "$SERIES" in
     T)   EXPERIMENTS=( "${T_SERIES[@]}" ) ;;
     U)   EXPERIMENTS=( "${U_SERIES[@]}" ) ;;
     V)   EXPERIMENTS=( "${V_SERIES[@]}" ) ;;
-    all) EXPERIMENTS=( "${M_SERIES[@]}" "${N_SERIES[@]}" "${O_SERIES[@]}" "${P_SERIES[@]}" "${Q_SERIES[@]}" "${R_SERIES[@]}" "${S_SERIES[@]}" "${T_SERIES[@]}" "${U_SERIES[@]}" "${V_SERIES[@]}" ) ;;
-    *)   echo "Unknown series '$SERIES'. Use M, N, O, P, Q, R, S, T, U, V, or all." >&2; exit 1 ;;
+    W)   EXPERIMENTS=( "${W_SERIES[@]}" ) ;;
+    all) EXPERIMENTS=( "${M_SERIES[@]}" "${N_SERIES[@]}" "${O_SERIES[@]}" "${P_SERIES[@]}" "${Q_SERIES[@]}" "${R_SERIES[@]}" "${S_SERIES[@]}" "${T_SERIES[@]}" "${U_SERIES[@]}" "${V_SERIES[@]}" "${W_SERIES[@]}" ) ;;
+    *)   echo "Unknown series '$SERIES'. Use M, N, O, P, Q, R, S, T, U, V, W, or all." >&2; exit 1 ;;
 esac
 
 # Apply --from filter: skip experiments whose trailing numeric index < FROM.
