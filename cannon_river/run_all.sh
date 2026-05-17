@@ -1,19 +1,20 @@
 #!/bin/bash
-# Usage: bash run_all.sh <short-description> [--series LETTER] [--from N]
+# Usage: bash run_all.sh <short-description> [--series LETTER] [--from EXP]
 # e.g.:  bash run_all.sh v1
 #        bash run_all.sh v1 --series V
-#        bash run_all.sh v1 --series V --from 3   # runs V03, V04, V05, V06, ...
+#        bash run_all.sh v1 --series X --from X00F   # runs X00F, X01, X01F, ...
 #
 # Runs model-selection experiments in series, each archived under
 # runs/<timestamp>_<desc>/ inside its own experiment directory.
-# Default: all series. Override with --series M, N, O, P, Q, R, S, T, U, or V.
-# --from N skips experiments whose trailing index is less than N.
+# Default: all series. Override with --series M, N, O, P, Q, R, S, T, U, V, W, or X.
+# --from EXP skips experiments that sort before EXP (lexicographic; handles suffix
+# letters such as X00F correctly).
 
 set -euo pipefail
 
 DESC=""
 SERIES="all"
-FROM=0
+FROM=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --series) SERIES="$2"; shift 2 ;;
@@ -21,7 +22,7 @@ while [[ $# -gt 0 ]]; do
         *)        DESC="$1";   shift   ;;
     esac
 done
-DESC="${DESC:?Usage: bash run_all.sh <description> [--series M|N|O|P|Q|R|S|T|U|V|W|X|all] [--from N]}"
+DESC="${DESC:?Usage: bash run_all.sh <description> [--series M|N|O|P|Q|R|S|T|U|V|W|X|all] [--from EXP]}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -54,11 +55,11 @@ case "$SERIES" in
     *)   echo "Unknown series '$SERIES'. Use M, N, O, P, Q, R, S, T, U, V, W, X, or all." >&2; exit 1 ;;
 esac
 
-# Apply --from filter: skip experiments whose trailing numeric index < FROM.
+# Apply --from filter: include experiments at or after FROM (lexicographic order).
+# Empty FROM means no filtering.
 FILTERED=()
 for EXP in "${EXPERIMENTS[@]}"; do
-    IDX=$(( 10#${EXP##*[A-Za-z]} ))   # strip leading letters, force base-10
-    [[ $IDX -ge $FROM ]] && FILTERED+=("$EXP")
+    [[ -z "$FROM" || "$EXP" > "$FROM" || "$EXP" == "$FROM" ]] && FILTERED+=("$EXP")
 done
 EXPERIMENTS=( "${FILTERED[@]}" )
 

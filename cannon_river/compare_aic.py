@@ -102,7 +102,10 @@ def _best_row(evaluations_dat):
 
 
 def _latest_run_dir(exp_dir):
-    runs = sorted(Path(exp_dir, 'runs').iterdir())
+    runs_path = Path(exp_dir, 'runs')
+    if not runs_path.is_dir():
+        return None
+    runs = sorted(runs_path.iterdir())
     runs = [r for r in runs if r.is_dir()]
     return runs[-1] if runs else None
 
