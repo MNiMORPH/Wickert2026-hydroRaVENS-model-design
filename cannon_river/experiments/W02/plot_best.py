@@ -8,19 +8,24 @@ Figure layout
 Left column  : precipitation (top, inverted) + observed/modelled discharge
 Right column : flow duration curve (log scale) with observed BFI annotated
 
-Usage (from cannon_river/):
+Reservoir structure is driven by driver.reservoir_order in params.yml.
+Defaults to ['shallow', 'soil', 'karst'][:n_reservoirs] for backward
+compatibility with experiments that predate that key.
+
+Usage (from the experiment directory):
     python plot_best.py                      # uses dakota.dat, saves best_fit.png
     python plot_best.py --dat dakota_test.dat --save test_fit.png
 """
 
 import argparse
 import sys
+from pathlib import Path
 import yaml
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-from hydroravens import run_and_score
+from hydroravens import HydrographSeparation, run_and_score
 from hydroravens.calibration import _nse, _kge, _log_kge, _kge_logfdc
 
 try:
@@ -28,8 +33,9 @@ try:
         CFG_TEMPLATE = yaml.safe_load(_f)['driver']['config_template']
 except (FileNotFoundError, KeyError):
     CFG_TEMPLATE = 'cannon_cfg_template.yml'
+
 OBJECTIVE_COL = 'neg_kge'
-ROUTING_N     = 2      # Nash-cascade shape; must match driver.py ROUTING_N
+ROUTING_N     = 2      # Nash-cascade shape; must match driver.py
 
 _MODULE_PARAMS_MAP = {
     'snowpack':      ['PDD_melt_factor'],
@@ -38,7 +44,19 @@ _MODULE_PARAMS_MAP = {
     'rain_on_snow':  [],
 }
 
+_RES_LABEL = {
+    'shallow': 'sh',
+    'soil':    'soil',
+    'karst':   'karst',
+    'deep':    'deep',
+}
+
+
 def _load_params_yml(path):
+    """
+    Return (metric, modules, params, reservoir_order, fixed_rec,
+            enforce_wb, spin_up).
+    """
     try:
         with open(path) as f:
             pcfg = yaml.safe_load(f)
@@ -49,29 +67,43 @@ def _load_params_yml(path):
                 for name in names:
                     if name in params:
                         params[name]['active'] = False
-        n_res = pcfg['driver'].get('n_reservoirs', 3)
-        return (pcfg['driver']['metric'], modules, params, n_res)
+        drv       = pcfg['driver']
+        n_res     = drv.get('n_reservoirs', 3)
+        res_order = drv.get('reservoir_order',
+                             ['shallow', 'soil', 'karst'][:n_res])
+        fixed_rec  = drv.get('recession_exponents', None)
+        enforce_wb = drv.get('enforce_water_balance', 'water-year')
+        spin_up    = drv.get('spin_up_cycles', 0)
+        return (drv['metric'], modules, params,
+                res_order, fixed_rec, enforce_wb, spin_up)
     except FileNotFoundError:
-        return 'KGE_logKGE', {}, {}, 3
+        return ('KGE_logKGE', {}, {},
+                ['shallow', 'soil', 'karst'], None, 'water-year', 0)
 
-# Deferred: populated after --params arg is parsed
-METRIC       = None
-MODULES      = None
-_PARAMS      = None
-N_RESERVOIRS = 3
 
-_T_NAMES    = ['log__t_efold_shallow', 'log__t_efold_soil', 'log__t_efold_karst']
-_F_NAMES    = ['f_exfiltration_shallow', 'f_exfiltration_soil']
-_PDM_NAMES  = ['log__H0_pdm_shallow', 'log__H0_pdm_soil', 'log__H0_pdm_karst']
-_TILE_NAMES = ['f_tile_shallow', 'f_tile_soil', 'f_tile_karst']
+# ---------------------------------------------------------------------------
+# Module-level globals — populated in __main__ after arg parsing
+# ---------------------------------------------------------------------------
+METRIC           = None
+MODULES          = None
+_PARAMS          = None
+RESERVOIR_ORDER  = ['shallow', 'soil', 'karst']
+_FIXED_RECESSION = None
+ENFORCE_WB       = 'water-year'
+SPIN_UP_CYCLES   = 0
+INITIAL_STATES   = None
 
+
+# ---------------------------------------------------------------------------
+# Parameter helpers (use module-level globals)
+# ---------------------------------------------------------------------------
 
 def _is_active(name):
     return (_PARAMS or {}).get(name, {}).get('active', False)
 
 
 def _get(row, name):
-    """Return active param value from dat row, or fixed fallback from params.yml."""
+    """Return active param value from dat row, or fixed fallback."""
     if _is_active(name):
         return float(row[name])
     return float((_PARAMS or {}).get(name, {}).get('fixed', 0.0))
@@ -90,20 +122,28 @@ def read_best_params(dat_file):
 
 
 def _pdm_list(row):
-    vals = [10 ** _get(row, n) if _is_active(n) else None
-            for n in _PDM_NAMES[:N_RESERVOIRS]]
+    names = [f'log__H0_pdm_{l}' for l in RESERVOIR_ORDER]
+    vals  = [10 ** _get(row, n) if _is_active(n) else None for n in names]
     return vals if any(v is not None for v in vals) else None
 
 
 def _tile_list(row):
-    """Return f_tile list matching driver.py shared-tile logic, or None."""
+    """
+    Tile-drain fractions in reservoir_order; None if no tile params present.
+    Preserves the W/V/N/M series shared-tile convention when 'shallow' is in
+    the order but f_tile_shallow is absent.
+    """
     params = _PARAMS or {}
-    if not any(n in params for n in _TILE_NAMES[:N_RESERVOIRS]):
+    names  = [f'f_tile_{l}' for l in RESERVOIR_ORDER]
+    if not any(n in params for n in names):
         return None
-    vals = [_get(row, n) if n in params else 0.0
-            for n in _TILE_NAMES[:N_RESERVOIRS]]
-    if 'f_tile_shallow' not in params and 'f_tile_soil' in params:
-        vals[0] = vals[1]
+    vals = [_get(row, n) if n in params else 0.0 for n in names]
+    if ('shallow' in RESERVOIR_ORDER
+            and 'f_tile_shallow' not in params
+            and 'f_tile_soil' in params):
+        idx_sh = RESERVOIR_ORDER.index('shallow')
+        idx_so = RESERVOIR_ORDER.index('soil')
+        vals[idx_sh] = vals[idx_so]
     return vals
 
 
@@ -111,6 +151,13 @@ def _tau_tile(row):
     if 'log__tau_tile' not in (_PARAMS or {}):
         return None
     return 10 ** _get(row, 'log__tau_tile')
+
+
+def _hmax(row):
+    key = f'log__Hmax_{RESERVOIR_ORDER[0]}'
+    if key not in (_PARAMS or {}):
+        return None
+    return [10 ** _get(row, key)]
 
 
 def _et_alpha(row):
@@ -131,33 +178,70 @@ def _wp_soil_sigma(row):
     return _get(row, 'wp_soil_sigma')
 
 
+def _recession_exponents(row):
+    """Return (exponents, n_calibrated) using module-level globals."""
+    params = _PARAMS or {}
+    if _FIXED_RECESSION is not None:
+        return list(_FIXED_RECESSION), 0
+    has_shared = 'recession_b' in params
+    exponents  = []
+    n_cal      = 0
+    for label in RESERVOIR_ORDER:
+        label_key = f'recession_b_{label}'
+        if label == 'shallow':
+            exponents.append(1.0)
+        elif has_shared:
+            exponents.append(_get(row, 'recession_b'))
+        elif label_key in params:
+            exponents.append(_get(row, label_key))
+            n_cal += 1
+        else:
+            exponents.append(1.0)
+    if has_shared:
+        n_cal = 1 if any(l != 'shallow' for l in RESERVOIR_ORDER) else 0
+    if all(e == 1.0 for e in exponents):
+        return None, 0
+    return exponents, n_cal
+
+
 def run_model(row):
+    rec_exp, rec_k = _recession_exponents(row)
     return run_and_score(
         CFG_TEMPLATE,
-        t_efold               = [10 ** _get(row, n) for n in _T_NAMES[:N_RESERVOIRS]],
-        f_to_discharge        = [_get(row, n) for n in _F_NAMES[:N_RESERVOIRS - 1]],
-        melt_factor           =  _get(row, 'PDD_melt_factor'),
-        fdd_threshold         =  10 ** _get(row, 'log__fdd_threshold'),
-        snow_insulation_k     =  _get(row, 'snow_insulation_k'),
-        Hmax                  = [10 ** _get(row, 'log__Hmax_shallow')],
-        pdm_H0                =  _pdm_list(row),
-        f_tile                =  _tile_list(row),
-        tau_tile              =  _tau_tile(row),
-        direct_runoff_fraction=  _get(row, 'f_direct_runoff'),
-        baseflow_Q            =  _get(row, 'baseflow_Q'),
-        et_alpha              =  _et_alpha(row),
-        wp_soil               =  _wp_soil(row),
-        wp_soil_sigma         =  _wp_soil_sigma(row),
-        routing_K             =  10 ** _get(row, 'log__routing_K'),
-        routing_N             =  ROUTING_N,
-        modules               =  MODULES,
-        metric                =  METRIC,
+        t_efold                = [10 ** _get(row, f'log__t_efold_{l}')
+                                   for l in RESERVOIR_ORDER],
+        f_to_discharge         = [_get(row, f'f_exfiltration_{l}')
+                                   for l in RESERVOIR_ORDER[:-1]],
+        melt_factor            =  _get(row, 'PDD_melt_factor'),
+        fdd_threshold          =  10 ** _get(row, 'log__fdd_threshold'),
+        snow_insulation_k      =  _get(row, 'snow_insulation_k'),
+        Hmax                   =  _hmax(row),
+        pdm_H0                 =  _pdm_list(row),
+        f_tile                 =  _tile_list(row),
+        tau_tile               =  _tau_tile(row),
+        direct_runoff_fraction =  _get(row, 'f_direct_runoff'),
+        baseflow_Q             =  _get(row, 'baseflow_Q'),
+        et_alpha               =  _et_alpha(row),
+        wp_soil                =  _wp_soil(row),
+        wp_soil_sigma          =  _wp_soil_sigma(row),
+        recession_exponents            = rec_exp,
+        recession_exponents_calibrated = rec_k,
+        routing_K              =  10 ** _get(row, 'log__routing_K'),
+        routing_N              =  ROUTING_N,
+        modules                =  MODULES,
+        metric                 =  METRIC,
+        enforce_water_balance  =  ENFORCE_WB,
+        spin_up_cycles         =  SPIN_UP_CYCLES,
+        initial_states         =  INITIAL_STATES,
     )
 
 
-def make_plot(result, params, save_path, metric=METRIC):
+# ---------------------------------------------------------------------------
+# Plot
+# ---------------------------------------------------------------------------
+
+def make_plot(result, params_row, save_path):
     b     = result.buckets
-    score = result.score
     aic   = result.aic
 
     mask  = (b.hydrodata['Specific Discharge (modeled) [mm/day]'].notna()
@@ -168,8 +252,7 @@ def make_plot(result, params, save_path, metric=METRIC):
     kge        = _kge(m_all, o_all)
     log_kge    = _log_kge(m_all, o_all)
     kge_logfdc = result.kge_logfdc
-
-    dates = b.hydrodata['Date']
+    dates      = b.hydrodata['Date']
 
     fig = plt.figure(figsize=(14, 7))
     gs  = fig.add_gridspec(2, 2, width_ratios=[3, 1], height_ratios=[1, 2.5],
@@ -197,49 +280,94 @@ def make_plot(result, params, save_path, metric=METRIC):
     ax_q.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
     plt.setp(ax_q.get_xticklabels(), rotation=30, ha='right')
 
-    t_shallow = 10 ** _get(params, 'log__t_efold_shallow')
-    t_soil    = 10 ** _get(params, 'log__t_efold_soil')
-    routing_K = 10 ** _get(params, 'log__routing_K')
-
+    # ---- annotation text ----
     score_str = (f'logKGE = {log_kge:.3f}   NSE = {nse:.3f}   KGE = {kge:.3f}'
                  f'   KGE$_{{logFDC}}$ = {kge_logfdc:.3f}   AIC = {aic:.1f}')
-    tau_str = f'$\\tau_{{sh}}$ = {t_shallow:.1f} d,  $\\tau_{{soil}}$ = {t_soil:.0f} d'
-    if N_RESERVOIRS >= 3:
-        tau_str += f',  $\\tau_{{karst}}$ = {10 ** _get(params, "log__t_efold_karst"):.0f} d'
-    f_str = f'$f_{{sh}}$ = {_get(params, "f_exfiltration_shallow"):.3f}'
-    if N_RESERVOIRS >= 3:
-        f_str += f',  $f_{{soil}}$ = {_get(params, "f_exfiltration_soil"):.3f}'
-    param_lines = (
-        f'BFI: obs = {result.bfi_obs:.3f},  mod = {result.bfi_mod:.3f}\n'
-        + tau_str + '\n' + f_str
-    )
+
+    tau_parts = []
+    for label in RESERVOIR_ORDER:
+        val = 10 ** _get(params_row, f'log__t_efold_{label}')
+        lbl = _RES_LABEL.get(label, label)
+        fmt = '.1f' if val < 10 else '.0f'
+        tau_parts.append(f'$\\tau_{{{lbl}}}$ = {val:{fmt}} d')
+    tau_str = ',  '.join(tau_parts)
+
+    f_parts = []
+    for label in RESERVOIR_ORDER[:-1]:
+        val = _get(params_row, f'f_exfiltration_{label}')
+        lbl = _RES_LABEL.get(label, label)
+        f_parts.append(f'$f_{{{lbl}}}$ = {val:.3f}')
+    f_str = ',  '.join(f_parts)
+
+    param_lines = (f'BFI: obs = {result.bfi_obs:.3f},  mod = {result.bfi_mod:.3f}\n'
+                   + tau_str + '\n' + f_str)
+
     if _is_active('PDD_melt_factor'):
-        param_lines += f',  PDD = {_get(params, "PDD_melt_factor"):.2f} mm °C$^{{-1}}$ d$^{{-1}}$'
-    if _is_active('log__Hmax_shallow'):
-        param_lines += f',  $H_{{max}}$ = {10 ** _get(params, "log__Hmax_shallow"):.0f} mm'
-    for _pdm_n, _label in zip(_PDM_NAMES[:N_RESERVOIRS],
-                               [r'$H_{0,\mathrm{sh}}$',
-                                r'$H_{0,\mathrm{soil}}$',
-                                r'$H_{0,\mathrm{karst}}$']):
-        if _is_active(_pdm_n):
-            param_lines += f',  {_label} = {10 ** _get(params, _pdm_n):.0f} mm'
+        param_lines += (f',  PDD = {_get(params_row, "PDD_melt_factor"):.2f}'
+                        f' mm °C$^{{-1}}$ d$^{{-1}}$')
+
+    hmax_key = f'log__Hmax_{RESERVOIR_ORDER[0]}'
+    if _is_active(hmax_key):
+        param_lines += f',  $H_{{max}}$ = {10**_get(params_row, hmax_key):.0f} mm'
+
+    for label in RESERVOIR_ORDER:
+        name = f'log__H0_pdm_{label}'
+        if _is_active(name):
+            lbl = _RES_LABEL.get(label, label)
+            param_lines += (f',  $H_{{0,\\mathrm{{{lbl}}}}}$'
+                            f' = {10**_get(params_row, name):.0f} mm')
+
     if _is_active('log__fdd_threshold'):
-        param_lines += f',  FDD$_{{thresh}}$ = {10 ** _get(params, "log__fdd_threshold"):.0f} °C·d'
+        param_lines += (f',  FDD$_{{thresh}}$'
+                        f' = {10**_get(params_row, "log__fdd_threshold"):.0f} °C·d')
     if _is_active('snow_insulation_k'):
-        param_lines += f',  $k_{{ins}}$ = {_get(params, "snow_insulation_k"):.4f} mm$^{{-1}}$ SWE'
-    if _is_active('f_tile_soil'):
-        param_lines += f',  $f_{{tile}}$ = {_get(params, "f_tile_soil"):.3f}'
+        param_lines += (f',  $k_{{ins}}$'
+                        f' = {_get(params_row, "snow_insulation_k"):.4f}'
+                        f' mm$^{{-1}}$ SWE')
+
+    # Tile: shared (W/V/N/M convention) or per-reservoir
+    params = _PARAMS or {}
+    _shared_tile = ('shallow' in RESERVOIR_ORDER
+                    and 'f_tile_shallow' not in params
+                    and 'f_tile_soil' in params
+                    and _is_active('f_tile_soil'))
+    if _shared_tile:
+        param_lines += f',  $f_{{tile}}$ = {_get(params_row, "f_tile_soil"):.3f}'
+    else:
+        for label in RESERVOIR_ORDER:
+            name = f'f_tile_{label}'
+            if _is_active(name):
+                lbl = _RES_LABEL.get(label, label)
+                param_lines += f',  $f_{{tile,{lbl}}}$ = {_get(params_row, name):.3f}'
     if _is_active('log__tau_tile'):
-        param_lines += f',  $\\tau_{{tile}}$ = {10 ** _get(params, "log__tau_tile"):.1f} d'
+        param_lines += (f',  $\\tau_{{tile}}$'
+                        f' = {10**_get(params_row, "log__tau_tile"):.1f} d')
+
     if _is_active('et_alpha'):
-        param_lines += f',  $\\alpha_{{ET}}$ = {_get(params, "et_alpha"):.3f}'
+        param_lines += f',  $\\alpha_{{ET}}$ = {_get(params_row, "et_alpha"):.3f}'
     if _is_active('wp_soil'):
-        param_lines += f',  $H_{{wp}}$ = {_get(params, "wp_soil"):.1f} mm'
+        param_lines += f',  $H_{{wp}}$ = {_get(params_row, "wp_soil"):.1f} mm'
     if _is_active('wp_soil_sigma'):
-        param_lines += f',  $\\sigma_{{wp}}$ = {_get(params, "wp_soil_sigma"):.1f} mm'
+        param_lines += f',  $\\sigma_{{wp}}$ = {_get(params_row, "wp_soil_sigma"):.1f} mm'
+
+    rec_exp, _ = _recession_exponents(params_row)
+    if rec_exp is not None:
+        labeled   = [(l, bv) for l, bv in zip(RESERVOIR_ORDER, rec_exp) if bv != 1.0]
+        unique_b  = list(dict.fromkeys(f'{bv:.6f}' for _, bv in labeled))
+        if len(unique_b) == 1:
+            param_lines += f',  $b$ = {labeled[0][1]:.3f}'
+        else:
+            for label, bv in labeled:
+                lbl = _RES_LABEL.get(label, label)
+                param_lines += f',  $b_{{{lbl}}}$ = {bv:.3f}'
+
+    routing_K = 10 ** _get(params_row, 'log__routing_K')
     param_lines += f'\n$K_{{route}}$ = {routing_K:.2f} d  (N={ROUTING_N})'
     if _is_active('f_direct_runoff'):
-        param_lines += f',  $\\gamma_{{direct}}$ = {_get(params, "f_direct_runoff"):.3f}'
+        param_lines += (f',  $\\gamma_{{direct}}$'
+                        f' = {_get(params_row, "f_direct_runoff"):.3f}')
+    if _is_active('baseflow_Q'):
+        param_lines += f',  $Q_{{base}}$ = {_get(params_row, "baseflow_Q"):.4f} mm/d'
 
     ann = score_str + '\n' + param_lines
     ax_q.text(0.02, 0.97, ann, transform=ax_q.transAxes,
@@ -258,54 +386,102 @@ def make_plot(result, params, save_path, metric=METRIC):
     ax_fdc.grid(True, which='both', alpha=0.3)
 
     fig.suptitle('hydroRaVENS – Cannon River best-fit calibration', fontsize=13)
-
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     print(f'Figure saved to {save_path}')
 
 
+# ---------------------------------------------------------------------------
+# __main__
+# ---------------------------------------------------------------------------
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dat',    default='dakota.dat',   help='Dakota tabular data file')
-    parser.add_argument('--save',   default='best_fit.png', help='Output figure path')
-    parser.add_argument('--params', default='params.yml',   help='params.yml config file')
-    parser.add_argument('--no-show', action='store_true',   help='Save only; skip plt.show()')
+    parser.add_argument('--dat',     default='dakota.dat',   help='Dakota tabular data file')
+    parser.add_argument('--save',    default='best_fit.png', help='Output figure path')
+    parser.add_argument('--params',  default='params.yml',   help='params.yml config file')
+    parser.add_argument('--no-show', action='store_true',    help='Save only; skip plt.show()')
     args = parser.parse_args()
 
-    METRIC, MODULES, _PARAMS, N_RESERVOIRS = _load_params_yml(args.params)
+    (METRIC, MODULES, _PARAMS,
+     RESERVOIR_ORDER, _FIXED_RECESSION,
+     ENFORCE_WB, SPIN_UP_CYCLES) = _load_params_yml(args.params)
+
+    # Data-driven initial reservoir states — mirrors driver.py exactly
+    cfg_path   = Path(CFG_TEMPLATE)
+    cfg_dir    = cfg_path.parent
+    with open(cfg_path) as _f:
+        _mcfg = yaml.safe_load(_f)
+    _datafile   = _mcfg['timeseries']['datafile']
+    _data_path  = (Path(_datafile) if Path(_datafile).is_absolute()
+                   else cfg_dir / _datafile)
+    _area_km2   = _mcfg['catchment']['drainage_basin_area__km2']
+    _df_raw     = pd.read_csv(_data_path, parse_dates=['Date'])
+    _Q_specific = _df_raw['Discharge [m^3/s]'].values * 86400.0 / (_area_km2 * 1e3)
+    _precip     = _df_raw['Precipitation [mm/day]'].values
+    _hs         = HydrographSeparation(_Q_specific,
+                                        n_reservoirs=len(RESERVOIR_ORDER),
+                                        precip=_precip)
+    _hs.fit()
+    INITIAL_STATES = {'reservoirs': _hs.get_initial_conditions()['H0']}
 
     best = read_best_params(args.dat)
 
+    # Summary to stdout
     print(f'\nBest evaluation: {int(best["eval_id"])}')
     print(f'  metric           = {METRIC}')
-    print(f'  t_efold_shallow  = {10 ** _get(best, "log__t_efold_shallow"):.1f} days')
-    print(f'  t_efold_soil     = {10 ** _get(best, "log__t_efold_soil"):.0f} days')
-    if N_RESERVOIRS >= 3:
-        print(f'  t_efold_karst    = {10 ** _get(best, "log__t_efold_karst"):.0f} days')
-    print(f'  f_exfilt_shallow = {_get(best, "f_exfiltration_shallow"):.4f}')
-    if N_RESERVOIRS >= 3:
-        print(f'  f_exfilt_soil    = {_get(best, "f_exfiltration_soil"):.4f}')
+    print(f'  reservoir_order  = {RESERVOIR_ORDER}')
+    for label in RESERVOIR_ORDER:
+        val = 10 ** _get(best, f'log__t_efold_{label}')
+        lbl = _RES_LABEL.get(label, label)
+        print(f'  t_efold_{lbl:<8} = {val:.1f} days')
+    for label in RESERVOIR_ORDER[:-1]:
+        val = _get(best, f'f_exfiltration_{label}')
+        lbl = _RES_LABEL.get(label, label)
+        print(f'  f_exfilt_{lbl:<7} = {val:.4f}')
     if _is_active('PDD_melt_factor'):
         print(f'  PDD_melt_factor  = {_get(best, "PDD_melt_factor"):.4f} mm/°C/day')
-    if _is_active('log__Hmax_shallow'):
-        print(f'  Hmax_shallow     = {10 ** _get(best, "log__Hmax_shallow"):.1f} mm')
-    for _pdm_n, _lbl in zip(_PDM_NAMES[:N_RESERVOIRS],
-                             ['H0_pdm_shallow', 'H0_pdm_soil', 'H0_pdm_karst']):
-        if _is_active(_pdm_n):
-            print(f'  {_lbl:<17}= {10 ** _get(best, _pdm_n):.1f} mm')
+    hmax_key = f'log__Hmax_{RESERVOIR_ORDER[0]}'
+    if _is_active(hmax_key):
+        print(f'  Hmax_{RESERVOIR_ORDER[0]:<10} = {10**_get(best, hmax_key):.1f} mm')
+    for label in RESERVOIR_ORDER:
+        name = f'log__H0_pdm_{label}'
+        if _is_active(name):
+            print(f'  {name:<22} = {10**_get(best, name):.1f} mm')
     if _is_active('log__fdd_threshold'):
-        print(f'  fdd_threshold    = {10 ** _get(best, "log__fdd_threshold"):.1f} °C·day')
+        print(f'  fdd_threshold    = {10**_get(best, "log__fdd_threshold"):.1f} °C·day')
     if _is_active('snow_insulation_k'):
         print(f'  snow_insulation_k= {_get(best, "snow_insulation_k"):.4f} mm⁻¹ SWE')
-    if _is_active('f_tile_soil'):
-        print(f'  f_tile           = {_get(best, "f_tile_soil"):.4f}')
+    params = _PARAMS or {}
+    _shared_tile = ('shallow' in RESERVOIR_ORDER
+                    and 'f_tile_shallow' not in params
+                    and 'f_tile_soil' in params
+                    and _is_active('f_tile_soil'))
+    if _shared_tile:
+        print(f'  f_tile (shared)  = {_get(best, "f_tile_soil"):.4f}')
+    else:
+        for label in RESERVOIR_ORDER:
+            name = f'f_tile_{label}'
+            if _is_active(name):
+                print(f'  {name:<22} = {_get(best, name):.4f}')
     if _is_active('log__tau_tile'):
-        print(f'  tau_tile         = {10 ** _get(best, "log__tau_tile"):.2f} days')
+        print(f'  tau_tile         = {10**_get(best, "log__tau_tile"):.2f} days')
     if _is_active('et_alpha'):
         print(f'  et_alpha         = {_get(best, "et_alpha"):.4f}')
+    rec_exp, _ = _recession_exponents(best)
+    if rec_exp is not None:
+        labeled  = [(l, bv) for l, bv in zip(RESERVOIR_ORDER, rec_exp) if bv != 1.0]
+        unique_b = list(dict.fromkeys(f'{bv:.6f}' for _, bv in labeled))
+        if len(unique_b) == 1:
+            print(f'  recession_b      = {labeled[0][1]:.4f}')
+        else:
+            for label, bv in labeled:
+                print(f'  recession_b_{label:<8} = {bv:.4f}')
     if _is_active('wp_soil'):
         print(f'  wp_soil          = {_get(best, "wp_soil"):.2f} mm')
     if _is_active('wp_soil_sigma'):
         print(f'  wp_soil_sigma    = {_get(best, "wp_soil_sigma"):.2f} mm')
+    if _is_active('baseflow_Q'):
+        print(f'  baseflow_Q       = {_get(best, "baseflow_Q"):.4f} mm/day')
     rK = 10 ** _get(best, 'log__routing_K')
     print(f'  routing_K        = {rK:.3f} days  (N={ROUTING_N},'
           f' mean travel time = {ROUTING_N * rK:.2f} days)')
@@ -313,11 +489,11 @@ if __name__ == '__main__':
         print(f'  f_direct_runoff  = {_get(best, "f_direct_runoff"):.4f}')
 
     result = run_model(best)
-    b     = result.buckets
-    mask  = (b.hydrodata['Specific Discharge (modeled) [mm/day]'].notna()
-             & b.hydrodata['Specific Discharge [mm/day]'].notna())
-    m_all = np.asarray(b.hydrodata.loc[mask, 'Specific Discharge (modeled) [mm/day]'])
-    o_all = np.asarray(b.hydrodata.loc[mask, 'Specific Discharge [mm/day]'])
+    b_     = result.buckets
+    mask   = (b_.hydrodata['Specific Discharge (modeled) [mm/day]'].notna()
+              & b_.hydrodata['Specific Discharge [mm/day]'].notna())
+    m_all  = np.asarray(b_.hydrodata.loc[mask, 'Specific Discharge (modeled) [mm/day]'])
+    o_all  = np.asarray(b_.hydrodata.loc[mask, 'Specific Discharge [mm/day]'])
     print(f'  logKGE           = {_log_kge(m_all, o_all):.4f}')
     print(f'  NSE              = {_nse(m_all, o_all):.4f}')
     print(f'  KGE              = {_kge(m_all, o_all):.4f}')
@@ -326,6 +502,6 @@ if __name__ == '__main__':
     print(f'  BFI obs          = {result.bfi_obs:.4f}')
     print(f'  BFI mod          = {result.bfi_mod:.4f}')
 
-    make_plot(result, best, save_path=args.save, metric=METRIC)
+    make_plot(result, best, save_path=args.save)
     if not args.no_show:
         plt.show()

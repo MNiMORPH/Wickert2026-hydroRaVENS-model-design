@@ -3,27 +3,29 @@
 compare_aic.py — Collect best-fit metrics from all model-selection experiments
 and print a summary table suitable for the paper.
 
-For each experiment with the given prefix (e.g. M00–M06 or N00–N04):
+For each experiment with the given prefix (e.g. M00–M06 or W00–W02):
   1. Locate the most-recently archived run.
   2. Read the best-fit row from evaluations.dat (lowest neg_kge).
   3. Re-run hydroRaVENS with those parameters (same logic as plot_best.py).
   4. Extract logKGE, NSE, KGE, KGE_logFDC, AIC, BFI_obs, BFI_mod.
 
+Reservoir structure is driven by driver.reservoir_order in each params.yml.
+Defaults to ['shallow', 'soil', 'karst'][:n_reservoirs] for backward
+compatibility with experiments that predate that key.
+
 Usage (from cannon_river/):
-    python compare_aic.py M
-    python compare_aic.py N --experiments N01 N03   # subset
-    python compare_aic.py M --csv results_table.csv
+    python compare_aic.py W
+    python compare_aic.py W --experiments W01 W02   # subset
+    python compare_aic.py W --csv results_table.csv
 """
 
 import argparse
-import os
 import sys
-import math
 import yaml
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from hydroravens import run_and_score
+from hydroravens import HydrographSeparation, run_and_score
 from hydroravens.calibration import _nse, _kge, _log_kge
 
 ROUTING_N = 2
@@ -35,11 +37,27 @@ _MODULE_PARAMS_MAP = {
     'rain_on_snow':  [],
 }
 
-_PDM_NAMES  = ['log__H0_pdm_shallow', 'log__H0_pdm_soil', 'log__H0_pdm_karst']
-_TILE_NAMES = ['f_tile_shallow', 'f_tile_soil', 'f_tile_karst']
+# Short labels used in annotations; extend as new reservoir types are added.
+_RES_LABEL = {
+    'shallow': 'sh',
+    'soil':    'soil',
+    'karst':   'karst',
+    'deep':    'deep',
+}
 
 
 def _load_params_yml(path):
+    """
+    Return (metric, modules, params, cfg_template,
+            reservoir_order, fixed_rec, enforce_wb, spin_up).
+
+    reservoir_order is a list of reservoir labels in cascade order, e.g.
+    ['shallow', 'soil', 'karst'] or ['soil', 'karst', 'deep'].  It drives
+    all parameter-name → reservoir-index mappings.
+
+    fixed_rec, if not None, is a list of pre-fixed recession exponents
+    (one per reservoir) read from driver.recession_exponents.
+    """
     with open(path) as f:
         pcfg = yaml.safe_load(f)
     modules = pcfg.get('modules', {})
@@ -49,11 +67,18 @@ def _load_params_yml(path):
             for name in names:
                 if name in params:
                     params[name]['active'] = False
-    cfg_template     = pcfg['driver']['config_template']
-    metric           = pcfg['driver']['metric']
-    n_reservoirs     = pcfg['driver'].get('n_reservoirs', 3)
-    enforce_wb       = pcfg['driver'].get('enforce_water_balance', 'water-year')
-    return metric, modules, params, cfg_template, n_reservoirs, enforce_wb
+    drv = pcfg['driver']
+    cfg_template = drv['config_template']
+    metric       = drv['metric']
+    n_res        = drv.get('n_reservoirs', 3)
+    enforce_wb   = drv.get('enforce_water_balance', 'water-year')
+    spin_up      = drv.get('spin_up_cycles', 0)
+    fixed_rec    = drv.get('recession_exponents', None)
+    # Default preserves the historical shallow/soil/karst ordering.
+    reservoir_order = drv.get('reservoir_order',
+                               ['shallow', 'soil', 'karst'][:n_res])
+    return (metric, modules, params, cfg_template,
+            reservoir_order, fixed_rec, enforce_wb, spin_up)
 
 
 def _is_active(params, name):
@@ -61,6 +86,7 @@ def _is_active(params, name):
 
 
 def _get(row_or_dict, params, name):
+    """Return active param value from dat row, or fixed fallback from params."""
     if _is_active(params, name):
         return float(row_or_dict[name])
     return float(params.get(name, {}).get('fixed', 0.0))
@@ -78,26 +104,40 @@ def _best_row(evaluations_dat):
 def _latest_run_dir(exp_dir):
     runs = sorted(Path(exp_dir, 'runs').iterdir())
     runs = [r for r in runs if r.is_dir()]
-    if not runs:
-        return None
-    return runs[-1]
+    return runs[-1] if runs else None
 
 
-def _pdm_list(row, params, n_reservoirs):
-    vals = [10 ** _get(row, params, n) if _is_active(params, n) else None
-            for n in _PDM_NAMES[:n_reservoirs]]
+# ---------------------------------------------------------------------------
+# Reservoir-order–aware parameter helpers
+# ---------------------------------------------------------------------------
+
+def _pdm_list(row, params, reservoir_order):
+    """PDM H0 list in reservoir_order; None entry where PDM is inactive."""
+    names = [f'log__H0_pdm_{label}' for label in reservoir_order]
+    vals  = [10 ** _get(row, params, n) if _is_active(params, n) else None
+             for n in names]
     return vals if any(v is not None for v in vals) else None
 
 
-def _tile_list(row, params, n_reservoirs):
-    if not any(n in params for n in _TILE_NAMES[:n_reservoirs]):
+def _tile_list(row, params, reservoir_order):
+    """
+    Tile-drain fraction list in reservoir_order order, or None if no tile
+    parameters are present.
+
+    Legacy compatibility: when 'shallow' is in reservoir_order but
+    f_tile_shallow is absent while f_tile_soil is present, shallow and soil
+    share the same tile network (W/V/N/M series convention).
+    """
+    names = [f'f_tile_{label}' for label in reservoir_order]
+    if not any(n in params for n in names):
         return None
-    vals = [_get(row, params, n) if n in params else 0.0
-            for n in _TILE_NAMES[:n_reservoirs]]
-    # Shared tile: shallow uses soil's value when f_tile_shallow is absent
-    # (same tile network, one calibrated parameter covers both reservoirs).
-    if 'f_tile_shallow' not in params and 'f_tile_soil' in params:
-        vals[0] = vals[1]
+    vals = [_get(row, params, n) if n in params else 0.0 for n in names]
+    if ('shallow' in reservoir_order
+            and 'f_tile_shallow' not in params
+            and 'f_tile_soil' in params):
+        idx_sh = reservoir_order.index('shallow')
+        idx_so = reservoir_order.index('soil')
+        vals[idx_sh] = vals[idx_so]
     return vals
 
 
@@ -107,80 +147,122 @@ def _tau_tile(row, params):
     return 10 ** _get(row, params, 'log__tau_tile')
 
 
-def _et_scale(row, params):
-    if 'et_scale' not in params:
+def _hmax(row, params, reservoir_order):
+    """Hmax list for the first reservoir; None if not in params."""
+    key = f'log__Hmax_{reservoir_order[0]}'
+    if key not in params:
         return None
-    return _get(row, params, 'et_scale')
+    return [10 ** _get(row, params, key)]
+
+
+def _et_scale(row, params):
+    return _get(row, params, 'et_scale') if 'et_scale' in params else None
 
 
 def _et_alpha(row, params):
-    if 'et_alpha' not in params:
-        return None
-    return _get(row, params, 'et_alpha')
+    return _get(row, params, 'et_alpha') if 'et_alpha' in params else None
 
 
 def _wp_soil(row, params):
-    if 'wp_soil' not in params:
-        return None
-    return _get(row, params, 'wp_soil')
+    return _get(row, params, 'wp_soil') if 'wp_soil' in params else None
 
 
 def _wp_soil_sigma(row, params):
-    if 'wp_soil_sigma' not in params:
-        return None
-    return _get(row, params, 'wp_soil_sigma')
+    return _get(row, params, 'wp_soil_sigma') if 'wp_soil_sigma' in params else None
 
 
-def _recession_exponents(row, params, n_reservoirs):
-    """Build recession_exponents list; None if no recession params present."""
-    has_shared  = 'recession_b'       in params
-    has_soil    = 'recession_b_soil'  in params
-    has_karst   = 'recession_b_karst' in params
-    if not (has_shared or has_soil or has_karst):
+def _recession_exponents(row, params, reservoir_order, fixed_rec):
+    """
+    Build (exponents, n_calibrated) for run_and_score.
+
+    Priority:
+      1. fixed_rec from driver.recession_exponents (e.g. W00)
+      2. shared recession_b parameter (applies to all non-shallow reservoirs)
+      3. per-reservoir recession_b_{label} parameters
+      4. default 1.0 (linear) for unlisted or 'shallow' reservoirs
+    Returns (None, 0) if all exponents are 1.0.
+    """
+    if fixed_rec is not None:
+        return list(fixed_rec), 0
+
+    has_shared = 'recession_b' in params
+    exponents  = []
+    n_cal      = 0
+    for label in reservoir_order:
+        label_key = f'recession_b_{label}'
+        if label == 'shallow':
+            exponents.append(1.0)
+        elif has_shared:
+            exponents.append(_get(row, params, 'recession_b'))
+        elif label_key in params:
+            exponents.append(_get(row, params, label_key))
+            n_cal += 1
+        else:
+            exponents.append(1.0)
+    if has_shared:
+        n_cal = 1 if any(l != 'shallow' for l in reservoir_order) else 0
+    if all(e == 1.0 for e in exponents):
         return None, 0
-    b_soil  = (_get(row, params, 'recession_b')      if has_shared else
-               _get(row, params, 'recession_b_soil') if has_soil   else 1.0)
-    b_karst = (_get(row, params, 'recession_b')       if has_shared else
-               _get(row, params, 'recession_b_karst') if has_karst  else 1.0)
-    exponents = [1.0, b_soil, b_karst][:n_reservoirs]
-    n_calibrated = (1 if has_shared else 0) + (1 if has_soil else 0) + (1 if has_karst else 0)
-    return exponents, n_calibrated
+    return exponents, n_cal
 
+
+def _initial_states(cfg_template, reservoir_order, exp_dir):
+    """Compute data-driven initial reservoir states via HydrographSeparation."""
+    cfg_path = Path(exp_dir) / cfg_template
+    cfg_dir  = cfg_path.parent
+    with open(cfg_path) as f:
+        model_cfg = yaml.safe_load(f)
+    area_km2   = model_cfg['catchment']['drainage_basin_area__km2']
+    datafile   = model_cfg['timeseries']['datafile']
+    data_path  = (Path(datafile) if Path(datafile).is_absolute()
+                  else cfg_dir / datafile)
+    df         = pd.read_csv(data_path, parse_dates=['Date'])
+    Q_specific = df['Discharge [m^3/s]'].values * 86400.0 / (area_km2 * 1e3)
+    precip     = df['Precipitation [mm/day]'].values
+    hs         = HydrographSeparation(Q_specific,
+                                       n_reservoirs=len(reservoir_order),
+                                       precip=precip)
+    hs.fit()
+    return {'reservoirs': hs.get_initial_conditions()['H0']}
+
+
+# ---------------------------------------------------------------------------
+# Model runner
+# ---------------------------------------------------------------------------
 
 def _run_model(row, params, modules, metric, cfg_template, exp_dir,
-               n_reservoirs=3, enforce_wb='water-year'):
-    g = lambda name: _get(row, params, name)
-    t_efold_all      = [10 ** g('log__t_efold_shallow'),
-                        10 ** g('log__t_efold_soil'),
-                        10 ** g('log__t_efold_karst')]
-    f_discharge_all  = [g('f_exfiltration_shallow'),
-                        g('f_exfiltration_soil')]
-    rec_exp, rec_k = _recession_exponents(row, params, n_reservoirs)
-    cfg_path = str(Path(exp_dir, cfg_template))
+               reservoir_order, fixed_rec, enforce_wb='water-year', spin_up=0):
+    rec_exp, rec_k = _recession_exponents(row, params, reservoir_order, fixed_rec)
+    cfg_path = str(Path(exp_dir) / cfg_template)
+    init     = _initial_states(cfg_template, reservoir_order, exp_dir)
     return run_and_score(
         cfg_path,
-        t_efold               = t_efold_all[:n_reservoirs],
-        f_to_discharge        = f_discharge_all[:n_reservoirs - 1],
-        melt_factor           =  g('PDD_melt_factor'),
-        fdd_threshold         =  10 ** g('log__fdd_threshold'),
-        snow_insulation_k     =  g('snow_insulation_k'),
-        Hmax                  = [10 ** g('log__Hmax_shallow')],
-        pdm_H0                =  _pdm_list(row, params, n_reservoirs),
-        f_tile                =  _tile_list(row, params, n_reservoirs),
-        tau_tile              =  _tau_tile(row, params),
-        direct_runoff_fraction=  g('f_direct_runoff'),
-        baseflow_Q            =  g('baseflow_Q'),
-        et_scale              =  _et_scale(row, params),
-        et_alpha              =  _et_alpha(row, params),
-        wp_soil               =  _wp_soil(row, params),
-        wp_soil_sigma         =  _wp_soil_sigma(row, params),
-        recession_exponents           = rec_exp,
+        t_efold                = [10 ** _get(row, params, f'log__t_efold_{l}')
+                                   for l in reservoir_order],
+        f_to_discharge         = [_get(row, params, f'f_exfiltration_{l}')
+                                   for l in reservoir_order[:-1]],
+        melt_factor            =  _get(row, params, 'PDD_melt_factor'),
+        fdd_threshold          =  10 ** _get(row, params, 'log__fdd_threshold'),
+        snow_insulation_k      =  _get(row, params, 'snow_insulation_k'),
+        Hmax                   =  _hmax(row, params, reservoir_order),
+        pdm_H0                 =  _pdm_list(row, params, reservoir_order),
+        f_tile                 =  _tile_list(row, params, reservoir_order),
+        tau_tile               =  _tau_tile(row, params),
+        direct_runoff_fraction =  _get(row, params, 'f_direct_runoff'),
+        baseflow_Q             =  _get(row, params, 'baseflow_Q'),
+        et_scale               =  _et_scale(row, params),
+        et_alpha               =  _et_alpha(row, params),
+        wp_soil                =  _wp_soil(row, params),
+        wp_soil_sigma          =  _wp_soil_sigma(row, params),
+        recession_exponents            = rec_exp,
         recession_exponents_calibrated = rec_k,
-        routing_K             =  10 ** g('log__routing_K'),
-        routing_N             =  ROUTING_N,
-        modules               =  modules,
-        metric                =  metric,
-        enforce_water_balance =  enforce_wb,
+        routing_K              =  10 ** _get(row, params, 'log__routing_K'),
+        routing_N              =  ROUTING_N,
+        modules                =  modules,
+        metric                 =  metric,
+        enforce_water_balance  =  enforce_wb,
+        spin_up_cycles         =  spin_up,
+        initial_states         =  init,
     )
 
 
@@ -188,20 +270,25 @@ def _n_active(params):
     return sum(1 for p in params.values() if p.get('active', False))
 
 
+# ---------------------------------------------------------------------------
+# Per-experiment processing
+# ---------------------------------------------------------------------------
+
 def process_experiment(exp_dir):
-    exp_name = Path(exp_dir).name
+    exp_name    = Path(exp_dir).name
     params_path = Path(exp_dir, 'params.yml')
     if not params_path.exists():
         return None
 
-    metric, modules, params, cfg_template, n_reservoirs, enforce_wb = _load_params_yml(params_path)
+    (metric, modules, params, cfg_template,
+     reservoir_order, fixed_rec,
+     enforce_wb, spin_up) = _load_params_yml(params_path)
     k = _n_active(params)
 
     run_dir = _latest_run_dir(exp_dir)
     if run_dir is None:
         print(f'  {exp_name}: no archived runs — skipping', file=sys.stderr)
         return None
-
     eval_file = run_dir / 'evaluations.dat'
     if not eval_file.exists():
         print(f'  {exp_name}: evaluations.dat missing in {run_dir.name} — skipping',
@@ -212,7 +299,7 @@ def process_experiment(exp_dir):
     best = _best_row(eval_file)
 
     result = _run_model(best, params, modules, metric, cfg_template, exp_dir,
-                        n_reservoirs, enforce_wb)
+                        reservoir_order, fixed_rec, enforce_wb, spin_up)
     b    = result.buckets
     mask = (b.hydrodata['Specific Discharge (modeled) [mm/day]'].notna()
             & b.hydrodata['Specific Discharge [mm/day]'].notna())
@@ -220,25 +307,29 @@ def process_experiment(exp_dir):
     o    = np.asarray(b.hydrodata.loc[mask, 'Specific Discharge [mm/day]'])
 
     return {
-        'Model':       exp_name,
-        'k':           k,
-        'logKGE':      round(_log_kge(m, o), 3),
-        'NSE':         round(_nse(m, o),     3),
-        'KGE':         round(_kge(m, o),     3),
-        'KGE_logFDC':  round(result.kge_logfdc, 3),
-        'AIC':         round(result.aic,         1),
-        'BFI_obs':     round(result.bfi_obs,     3),
-        'BFI_mod':     round(result.bfi_mod,     3),
-        'run':         run_dir.name,
+        'Model':      exp_name,
+        'k':          k,
+        'logKGE':     round(_log_kge(m, o), 3),
+        'NSE':        round(_nse(m, o),     3),
+        'KGE':        round(_kge(m, o),     3),
+        'KGE_logFDC': round(result.kge_logfdc, 3),
+        'AIC':        round(result.aic,         1),
+        'BFI_obs':    round(result.bfi_obs,     3),
+        'BFI_mod':    round(result.bfi_mod,     3),
+        'run':        run_dir.name,
     }
 
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('prefix',
-                        help='Experiment prefix letter (e.g. M or N)')
-    parser.add_argument('--experiments', nargs='+',
-                        default=None, help='Subset of experiment names (default: all with prefix)')
+                        help='Experiment prefix letter (e.g. M or W)')
+    parser.add_argument('--experiments', nargs='+', default=None,
+                        help='Subset of experiment names (default: all with prefix)')
     parser.add_argument('--csv', default=None, help='Save table to CSV')
     args = parser.parse_args()
 
@@ -250,7 +341,8 @@ def main():
         exp_dirs = [experiments_root / e for e in args.experiments]
     else:
         exp_dirs = sorted(experiments_root.iterdir())
-        exp_dirs = [d for d in exp_dirs if d.is_dir() and d.name.startswith(args.prefix)]
+        exp_dirs = [d for d in exp_dirs
+                    if d.is_dir() and d.name.startswith(args.prefix)]
 
     print('Collecting results...\n', file=sys.stderr)
     rows = []
@@ -262,10 +354,10 @@ def main():
     if not rows:
         sys.exit('No results found.')
 
-    df = pd.DataFrame(rows).set_index('Model')
-    cols = ['k', 'logKGE', 'NSE', 'KGE', 'KGE_logFDC', 'AIC', 'BFI_obs', 'BFI_mod', 'run']
-    df = df[cols]
-
+    df   = pd.DataFrame(rows).set_index('Model')
+    cols = ['k', 'logKGE', 'NSE', 'KGE', 'KGE_logFDC',
+            'AIC', 'BFI_obs', 'BFI_mod', 'run']
+    df   = df[cols]
     print('\n' + df.to_string())
 
     if args.csv:
