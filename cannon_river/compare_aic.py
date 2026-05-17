@@ -166,6 +166,10 @@ def _et_alpha(row, params):
     return _get(row, params, 'et_alpha') if 'et_alpha' in params else None
 
 
+def _et_scale(row, params):
+    return _get(row, params, 'et_scale') if 'et_scale' in params else None
+
+
 def _wp_soil(row, params):
     return _get(row, params, 'wp_soil') if 'wp_soil' in params else None
 
