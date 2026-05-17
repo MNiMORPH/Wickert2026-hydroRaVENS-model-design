@@ -1,0 +1,185 @@
+# Y00I: Y00F structure with enforce_water_balance='global' and et_scale inactive.
+# Isolates the contribution of water-balance enforcement to the AIC gap between
+# X03 (AIC=-14797, enforce_wb='global') and Y00F (AIC=-13056, enforce_wb='none').
+# If Y00I approaches X03, the WB correction is doing the heavy lifting; if not,
+# some other structural difference explains the gap.
+#
+# Structure: 3-reservoir (soil + karst + deep), no tile, no PDM,
+#            b_soil calibrated [1.5,6.0], b_karst fixed at B-N 2.203,
+#            enforce_water_balance='global', et_scale inactive.
+# k = 9: t_efold×3, f_exfilt×2, PDD, fdd_threshold, snow_insulation_k,
+#         recession_b_soil
+# (one fewer than Y00F: et_scale removed; one fewer than X03: PDM removed)
+
+modules:
+  snowpack:          true
+  frozen_ground:     true
+  rain_on_snow:      true
+  direct_runoff:     false
+  dtr_fgi_decay:     false
+  et_water_stress:   false
+  et_reservoir_draw: true
+
+dakota:
+  ego_initial_samples:       300
+  ego_seed:                  12345
+  ps_max_evaluations:        200
+  ps_convergence_tolerance:  1.0e-4
+  evaluation_concurrency:    4
+
+driver:
+  config_template:       'cannon_cfg_1991_2011_soil_karst_deep.yml'
+  metric:                'KGE_logKGE'
+  spin_up_cycles:        1
+  routing_N:             2
+  n_reservoirs:          3
+  reservoir_order:       ['soil', 'karst', 'deep']
+  decade_start:          null
+  decade_end:            null
+  enforce_water_balance: 'global'
+
+parameters:
+
+  log__t_efold_soil:
+    description: "log10 soil-zone e-folding time [days]"
+    lower:   1.0
+    upper:   2.7
+    initial: 1.8
+    fixed:   1.8
+    active:  true
+
+  log__t_efold_karst:
+    description: "log10 karst e-folding time [days]"
+    lower:   2.5
+    upper:   4.5
+    initial: 3.5
+    fixed:   3.5
+    active:  true
+
+  log__t_efold_deep:
+    description: "log10 deep groundwater e-folding time [days]"
+    lower:   3.5
+    upper:   5.0
+    initial: 4.0
+    fixed:   4.0
+    active:  true
+
+  f_exfiltration_soil:
+    description: "fraction of soil-zone exfiltration to stream (remainder recharges karst)"
+    lower:   0.01
+    upper:   0.99
+    initial: 0.10
+    fixed:   0.10
+    active:  true
+
+  f_exfiltration_karst:
+    description: "fraction of karst exfiltration to stream (remainder recharges deep)"
+    lower:   0.01
+    upper:   0.99
+    initial: 0.70
+    fixed:   0.70
+    active:  true
+
+  PDD_melt_factor:
+    description: "degree-day snowmelt rate [mm SWE / degC / day]"
+    lower:   0.1
+    upper:   10.0
+    initial: 1.0
+    fixed:   1.0
+    active:  true
+
+  log__fdd_threshold:
+    description: "log10 frozen-ground-index threshold [degC·day]"
+    lower:   0.0
+    upper:   3.0
+    initial: 1.9
+    fixed:   3.0
+    active:  true
+
+  snow_insulation_k:
+    description: "snow insulation decay constant [mm⁻¹ SWE]"
+    lower:   0.0
+    upper:   0.15
+    initial: 0.057
+    fixed:   0.0
+    active:  true
+
+  recession_b_soil:
+    description: "power-law recession exponent for soil zone [dimensionless]; b=1 is linear"
+    lower:   1.5
+    upper:   6.0
+    initial: 2.2
+    fixed:   1.0
+    active:  true
+
+  recession_b_karst:
+    description: "karst recession exponent fixed at Brutsaert-Nieber (1977) value"
+    lower:   1.5
+    upper:   6.0
+    initial: 2.203
+    fixed:   2.203
+    active:  false
+
+  et_scale:
+    description: "global ET multiplier — inactive; water balance closed by global multiplier"
+    lower:   0.5
+    upper:   2.0
+    initial: 1.0
+    fixed:   1.0
+    active:  false
+
+  et_alpha:
+    description: "ET partition fraction — fixed at 1.0 (all ET from soil reservoir)"
+    lower:   0.01
+    upper:   0.99
+    initial: 1.0
+    fixed:   1.0
+    active:  false
+
+  log__H0_pdm_soil:
+    description: "PDM characteristic storage depth — inactive in Y00I (PDM removed)"
+    lower:   1.0
+    upper:   3.5
+    initial: 2.3
+    fixed:   2.3
+    active:  false
+
+  f_tile_soil:
+    description: "tile-drain fraction — inactive in Y00I (no tile)"
+    lower:   0.0
+    upper:   0.99
+    initial: 0.3
+    fixed:   0.0
+    active:  false
+
+  log__tau_tile:
+    description: "log10 tile-drain e-folding time — inactive in Y00I (no tile)"
+    lower:   0.0
+    upper:   1.146
+    initial: 0.845
+    fixed:   0.845
+    active:  false
+
+  f_direct_runoff:
+    description: "fast-bypass fraction of daily recharge"
+    lower:   0.0
+    upper:   0.5
+    initial: 0.05
+    fixed:   0.0
+    active:  false
+
+  baseflow_Q:
+    description: "constant regional groundwater import [mm/day]"
+    lower:   0.0
+    upper:   0.5
+    initial: 0.05
+    fixed:   0.0
+    active:  false
+
+  log__routing_K:
+    description: "log10 Nash-cascade storage time constant [days]"
+    lower:   -1.0
+    upper:    1.0
+    initial:  0.0
+    fixed:    0.0
+    active:  false
