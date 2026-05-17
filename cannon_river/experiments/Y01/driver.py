@@ -133,7 +133,8 @@ def _recession_exponents():
             exponents.append(get('recession_b'))
         elif label_key in _param_cfg:
             exponents.append(get(label_key))
-            n_cal += 1
+            if _param_cfg[label_key].get('active', False):
+                n_cal += 1
         else:
             exponents.append(1.0)
     if has_shared:

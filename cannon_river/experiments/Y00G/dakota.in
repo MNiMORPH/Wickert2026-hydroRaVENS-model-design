@@ -10,14 +10,14 @@
 #   PDD_melt_factor: degree-day snowmelt rate [mm SWE / degC / day]
 #   log__fdd_threshold: log10 frozen-ground-index threshold [degC·day]
 #   snow_insulation_k: snow insulation decay constant [mm⁻¹ SWE]
-#   recession_b_soil: power-law recession exponent for soil zone [dimensionless]; b=1 is linear
+#   recession_b_karst: power-law recession exponent for karst [dimensionless]; b=1 is linear
 #   et_scale: global ET multiplier [dimensionless]; diagnoses Thornthwaite magnitude bias
 # Fixed (inactive) parameters:
-#   recession_b_karst = 2.203  (karst recession exponent fixed at Brutsaert-Nieber (1977) value)
+#   recession_b_soil = 2.203  (soil recession exponent fixed at Brutsaert-Nieber (1977) value)
 #   et_alpha = 1.0  (ET partition fraction — fixed at 1.0 (all ET from soil reservoir))
-#   log__H0_pdm_soil = 2.3  (PDM characteristic storage depth — inactive in Y00F (PDM removed))
-#   f_tile_soil = 0.0  (tile-drain fraction — inactive in Y00F (no tile))
-#   log__tau_tile = 0.845  (log10 tile-drain e-folding time — inactive in Y00F (no tile))
+#   log__H0_pdm_soil = 2.3  (PDM characteristic storage depth — inactive in Y00G (PDM removed))
+#   f_tile_soil = 0.0  (tile-drain fraction — inactive in Y00G (no tile))
+#   log__tau_tile = 0.845  (log10 tile-drain e-folding time — inactive in Y00G (no tile))
 #   f_direct_runoff = 0.0  (fast-bypass fraction of daily recharge)
 #   baseflow_Q = 0.0  (constant regional groundwater import [mm/day])
 #   log__routing_K = 0.0  (log10 Nash-cascade storage time constant [days])
@@ -59,7 +59,7 @@ model
 variables
   id_variables = 'V1'
   continuous_design = 10
-    descriptors   = 'log__t_efold_soil' 'log__t_efold_karst' 'log__t_efold_deep' 'f_exfiltration_soil' 'f_exfiltration_karst' 'PDD_melt_factor' 'log__fdd_threshold' 'snow_insulation_k' 'recession_b_soil' 'et_scale'
+    descriptors   = 'log__t_efold_soil' 'log__t_efold_karst' 'log__t_efold_deep' 'f_exfiltration_soil' 'f_exfiltration_karst' 'PDD_melt_factor' 'log__fdd_threshold' 'snow_insulation_k' 'recession_b_karst' 'et_scale'
     lower_bounds  =  1.0  2.5  3.5  0.01  0.01  0.1  0.0  0.0  1.5  0.5
     upper_bounds  =  2.7  4.5  5.0  0.99  0.99  10.0  3.0  0.15  6.0  2.0
     initial_point =  1.8  3.5  4.0  0.1  0.7  1.0  1.9  0.057  2.2  1.0

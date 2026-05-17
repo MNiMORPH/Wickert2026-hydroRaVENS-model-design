@@ -200,7 +200,8 @@ def _recession_exponents(row):
             exponents.append(_get(row, 'recession_b'))
         elif label_key in params:
             exponents.append(_get(row, label_key))
-            n_cal += 1
+            if params[label_key].get('active', False):
+                n_cal += 1
         else:
             exponents.append(1.0)
     if has_shared:

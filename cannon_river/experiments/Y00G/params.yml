@@ -1,6 +1,7 @@
-# Y00F: Y00 with b_karst fixed at Brutsaert-Nieber (1977) value, b_soil calibrated.
-# Tests whether soil-zone nonlinearity is the key degree of freedom — karst recession
-# is assigned the theoretical B-N exponent while soil is free to exceed it.
+# Y00G: Y00 with b_soil fixed at Brutsaert-Nieber (1977) value, b_karst calibrated.
+# Complement of Y00F: tests whether karst nonlinearity carries the skill if soil is
+# constrained to the theoretical B-N exponent. If Y00F wins over Y00G, soil-zone
+# nonlinearity is the dominant driver; if similar, both reservoirs contribute.
 # 3-reservoir (soil + karst + deep), no tile, no PDM, et_scale active.
 # k = 10 (Y00 k=11 minus 1 recession parameter).
 
@@ -98,20 +99,20 @@ parameters:
     active:  true
 
   recession_b_soil:
-    description: "power-law recession exponent for soil zone [dimensionless]; b=1 is linear"
-    lower:   1.5
-    upper:   6.0
-    initial: 2.2
-    fixed:   1.0
-    active:  true
-
-  recession_b_karst:
-    description: "karst recession exponent fixed at Brutsaert-Nieber (1977) value"
+    description: "soil recession exponent fixed at Brutsaert-Nieber (1977) value"
     lower:   1.5
     upper:   6.0
     initial: 2.203
     fixed:   2.203
     active:  false
+
+  recession_b_karst:
+    description: "power-law recession exponent for karst [dimensionless]; b=1 is linear"
+    lower:   1.5
+    upper:   6.0
+    initial: 2.2
+    fixed:   1.0
+    active:  true
 
   et_scale:
     description: "global ET multiplier [dimensionless]; diagnoses Thornthwaite magnitude bias"
@@ -130,7 +131,7 @@ parameters:
     active:  false
 
   log__H0_pdm_soil:
-    description: "PDM characteristic storage depth — inactive in Y00F (PDM removed)"
+    description: "PDM characteristic storage depth — inactive in Y00G (PDM removed)"
     lower:   1.0
     upper:   3.5
     initial: 2.3
@@ -138,7 +139,7 @@ parameters:
     active:  false
 
   f_tile_soil:
-    description: "tile-drain fraction — inactive in Y00F (no tile)"
+    description: "tile-drain fraction — inactive in Y00G (no tile)"
     lower:   0.0
     upper:   0.99
     initial: 0.3
@@ -146,7 +147,7 @@ parameters:
     active:  false
 
   log__tau_tile:
-    description: "log10 tile-drain e-folding time — inactive in Y00F (no tile)"
+    description: "log10 tile-drain e-folding time — inactive in Y00G (no tile)"
     lower:   0.0
     upper:   1.146
     initial: 0.845
