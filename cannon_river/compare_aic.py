@@ -21,12 +21,18 @@ Usage (from cannon_river/):
 
 import argparse
 import sys
+import warnings
 import yaml
 import pandas as pd
 import numpy as np
 from pathlib import Path
 from hydroravens import HydrographSeparation, run_and_score
 from hydroravens.calibration import _nse, _kge, _log_kge
+
+# Intentional: et_scale carries explicit responsibility for the water balance
+# in Y-series experiments that use enforce_water_balance='none'.
+warnings.filterwarnings('ignore', message=r"enforce_water_balance='none'",
+                        category=UserWarning)
 
 ROUTING_N = 2
 
