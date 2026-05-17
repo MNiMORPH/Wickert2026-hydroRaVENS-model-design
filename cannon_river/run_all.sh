@@ -1,12 +1,12 @@
 #!/bin/bash
 # Usage: bash run_all.sh <short-description> [--series LETTER] [--from EXP]
 # e.g.:  bash run_all.sh v1
-#        bash run_all.sh v1 --series V
+#        bash run_all.sh v1 --series Z
 #        bash run_all.sh v1 --series X --from X00F   # runs X00F, X01, X01F, ...
 #
 # Runs model-selection experiments in series, each archived under
 # runs/<timestamp>_<desc>/ inside its own experiment directory.
-# Default: all series. Override with --series M, N, O, P, Q, R, S, T, U, V, W, X, or Y.
+# Default: all series. Override with --series M, N, O, P, Q, R, S, T, U, V, W, X, Y, or Z.
 # --from EXP skips experiments that sort before EXP (lexicographic; handles suffix
 # letters such as X00F correctly).
 
@@ -39,6 +39,7 @@ V_SERIES=( V00 V01 V02 V03 V04 V05 V06 )
 W_SERIES=( W00 W01 W02 )
 X_SERIES=( X00 X00F X01 X01F X01Q X02 X02F X03 X03F )
 Y_SERIES=( Y00 Y00F Y00G Y00H Y00I Y01 Y02 )
+Z_SERIES=( Z00 Z01 )
 case "$SERIES" in
     M)   EXPERIMENTS=( "${M_SERIES[@]}" ) ;;
     N)   EXPERIMENTS=( "${N_SERIES[@]}" ) ;;
@@ -53,8 +54,9 @@ case "$SERIES" in
     W)   EXPERIMENTS=( "${W_SERIES[@]}" ) ;;
     X)   EXPERIMENTS=( "${X_SERIES[@]}" ) ;;
     Y)   EXPERIMENTS=( "${Y_SERIES[@]}" ) ;;
-    all) EXPERIMENTS=( "${M_SERIES[@]}" "${N_SERIES[@]}" "${O_SERIES[@]}" "${P_SERIES[@]}" "${Q_SERIES[@]}" "${R_SERIES[@]}" "${S_SERIES[@]}" "${T_SERIES[@]}" "${U_SERIES[@]}" "${V_SERIES[@]}" "${W_SERIES[@]}" "${X_SERIES[@]}" "${Y_SERIES[@]}" ) ;;
-    *)   echo "Unknown series '$SERIES'. Use M, N, O, P, Q, R, S, T, U, V, W, X, Y, or all." >&2; exit 1 ;;
+    Z)   EXPERIMENTS=( "${Z_SERIES[@]}" ) ;;
+    all) EXPERIMENTS=( "${M_SERIES[@]}" "${N_SERIES[@]}" "${O_SERIES[@]}" "${P_SERIES[@]}" "${Q_SERIES[@]}" "${R_SERIES[@]}" "${S_SERIES[@]}" "${T_SERIES[@]}" "${U_SERIES[@]}" "${V_SERIES[@]}" "${W_SERIES[@]}" "${X_SERIES[@]}" "${Y_SERIES[@]}" "${Z_SERIES[@]}" ) ;;
+    *)   echo "Unknown series '$SERIES'. Use M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z, or all." >&2; exit 1 ;;
 esac
 
 # Apply --from filter: include experiments at or after FROM (lexicographic order).
