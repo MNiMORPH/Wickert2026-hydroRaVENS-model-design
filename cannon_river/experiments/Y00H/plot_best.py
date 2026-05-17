@@ -19,6 +19,7 @@ Usage (from the experiment directory):
 
 import argparse
 import sys
+import warnings
 from pathlib import Path
 import yaml
 import pandas as pd
@@ -27,6 +28,10 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from hydroravens import HydrographSeparation, run_and_score
 from hydroravens.calibration import _nse, _kge, _log_kge, _kge_logfdc
+
+# Intentional: et_scale carries explicit responsibility for the water balance.
+warnings.filterwarnings('ignore', message=r"enforce_water_balance='none'",
+                        category=UserWarning)
 
 try:
     with open('params.yml') as _f:
