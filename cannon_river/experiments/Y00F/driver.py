@@ -7,11 +7,17 @@ Compatible with any reservoir_order (2-res, 3-res, ...) and any combination of
 active/fixed parameters. Designed for the X/Y-series experiments.
 """
 
+import warnings
 import yaml
 import pandas as pd
 import dakota.interfacing as di
 import numpy as np
 from hydroravens import HydrographSeparation, run_and_score
+
+# Suppress the enforce_water_balance='none' warning that fires every evaluation.
+# Intentional: et_scale carries explicit responsibility for the water balance.
+warnings.filterwarnings('ignore', message=r"enforce_water_balance='none'",
+                        category=UserWarning)
 
 with open('params.yml') as f:
     _cfg = yaml.safe_load(f)
